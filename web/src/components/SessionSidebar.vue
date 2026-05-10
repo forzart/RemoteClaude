@@ -1,0 +1,188 @@
+<template>
+  <div class="sidebar" :class="{ collapsed: !open }">
+    <div class="sidebar-header">
+      <button class="btn-new" @click="promptNewSession">+ New Session</button>
+    </div>
+    <div class="sidebar-label">Sessions</div>
+    <div class="session-list">
+      <div
+        v-for="session in sessions"
+        :key="session.sessionId"
+        class="session-item"
+        :class="{ active: session.sessionId === currentSessionId }"
+        @click="$emit('switch', session.sessionId)"
+      >
+        <div class="session-title">{{ session.summary }}</div>
+        <div class="session-meta">{{ formatTime(session.lastModified) }}</div>
+        <button
+          class="session-delete"
+          @click.stop="$emit('delete', session.sessionId)"
+          title="Delete session"
+        >×</button>
+      </div>
+      <div v-if="sessions.length === 0" class="session-empty">
+        No sessions yet
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="btn-settings" @click="$emit('settings')">⚙ Settings</button>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import type { SessionInfo } from '../types/messages.js';
+
+defineProps<{
+  sessions: SessionInfo[];
+  currentSessionId: string | null;
+  open: boolean;
+}>();
+
+const emit = defineEmits<{
+  switch: [id: string];
+  delete: [id: string];
+  settings: [];
+  'new-session': [cwd: string, content?: string];
+}>();
+
+function promptNewSession() {
+  const cwd = window.prompt('Working directory (cwd):', '/home/user/project');
+  if (!cwd) return;
+  const content = window.prompt('Initial message (optional):', '');
+  emit('new-session', cwd, content || undefined);
+}
+
+function formatTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return new Date(ts).toLocaleDateString();
+}
+</script>
+
+<style scoped>
+.sidebar {
+  width: 240px;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  border-right: none;
+}
+
+.sidebar-header {
+  padding: 12px;
+}
+
+.btn-new {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sidebar-label {
+  padding: 0 12px 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.session-item {
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+}
+
+.session-item:hover {
+  background: var(--bg-hover);
+}
+
+.session-item.active {
+  background: var(--bg-hover);
+  border-left: 2px solid var(--color-link);
+}
+
+.session-title {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 20px;
+}
+
+.session-item:not(.active) .session-title {
+  color: var(--text-secondary);
+}
+
+.session-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.session-delete {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  display: none;
+}
+
+.session-item:hover .session-delete {
+  display: block;
+}
+
+.session-delete:hover {
+  color: var(--color-error);
+}
+
+.session-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sidebar-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-settings {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.btn-settings:hover {
+  color: var(--text-primary);
+}
+</style>
