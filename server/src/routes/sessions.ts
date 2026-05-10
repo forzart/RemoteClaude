@@ -1,24 +1,47 @@
 import type { FastifyInstance } from 'fastify';
-import { listSessions, deleteSession } from '@anthropic-ai/claude-agent-sdk';
+import { readdirSync, statSync, rmSync } from 'fs';
+import { resolve } from 'path';
+import { SESSIONS_ROOT } from '../services/agent-query.js';
+
+interface SessionEntry {
+  sessionName: string;
+  createdAt: number;
+}
+
+function listRemoteSessions(): SessionEntry[] {
+  try {
+    const entries = readdirSync(SESSIONS_ROOT, { withFileTypes: true });
+    return entries
+      .filter(e => e.isDirectory())
+      .map(e => {
+        const dirPath = resolve(SESSIONS_ROOT, e.name);
+        const stat = statSync(dirPath);
+        return { sessionName: e.name, createdAt: stat.birthtimeMs };
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    return [];
+  }
+}
 
 export function registerSessionRoutes(app: FastifyInstance): void {
   app.get('/api/sessions', async (_request, reply) => {
-    const sessions = await listSessions();
+    const sessions = listRemoteSessions();
     return reply.send(sessions);
   });
 
-  app.delete<{ Params: { id: string } }>(
-    '/api/sessions/:id',
+  app.delete<{ Params: { name: string } }>(
+    '/api/sessions/:name',
     async (request, reply) => {
-      const { id } = request.params;
+      const { name } = request.params;
+      const sessionDir = resolve(SESSIONS_ROOT, name);
       try {
-        await deleteSession(id);
-        return reply.code(204).send();
-      } catch (err) {
-        return reply.code(404).send({
-          error: err instanceof Error ? err.message : 'Session not found',
-        });
+        statSync(sessionDir);
+      } catch {
+        return reply.code(404).send({ error: 'Session not found' });
       }
+      rmSync(sessionDir, { recursive: true, force: true });
+      return reply.code(204).send();
     },
   );
 }

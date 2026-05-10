@@ -7,16 +7,16 @@
     <div class="session-list">
       <div
         v-for="session in sessions"
-        :key="session.sessionId"
+        :key="session.sessionName"
         class="session-item"
-        :class="{ active: session.sessionId === currentSessionId }"
-        @click="$emit('switch', session.sessionId)"
+        :class="{ active: session.sessionName === currentSessionName }"
+        @click="$emit('switch', session.sessionName)"
       >
-        <div class="session-title">{{ session.summary }}</div>
-        <div class="session-meta">{{ formatTime(session.lastModified) }}</div>
+        <div class="session-title">{{ session.sessionName }}</div>
+        <div class="session-meta">{{ formatTime(session.createdAt) }}</div>
         <button
           class="session-delete"
-          @click.stop="confirmDelete(session.sessionId)"
+          @click.stop="confirmDelete(session.sessionName)"
           title="Delete session"
         >×</button>
       </div>
@@ -35,27 +35,27 @@ import type { SessionInfo } from '../types/messages.js';
 
 defineProps<{
   sessions: SessionInfo[];
-  currentSessionId: string | null;
+  currentSessionName: string | null;
   open: boolean;
 }>();
 
 const emit = defineEmits<{
-  switch: [id: string];
-  delete: [id: string];
+  switch: [sessionName: string];
+  delete: [sessionName: string];
   settings: [];
-  'new-session': [cwd: string, content?: string];
+  'new-session': [sessionName: string, content?: string];
 }>();
 
 function promptNewSession() {
-  const cwd = window.prompt('Working directory (cwd):', '/home/user/project');
-  if (!cwd) return;
+  const sessionName = window.prompt('Session name:', '');
+  if (!sessionName) return;
   const content = window.prompt('Initial message (optional):', '');
-  emit('new-session', cwd, content || undefined);
+  emit('new-session', sessionName, content || undefined);
 }
 
-function confirmDelete(id: string) {
+function confirmDelete(sessionName: string) {
   if (window.confirm('Delete this session?')) {
-    emit('delete', id);
+    emit('delete', sessionName);
   }
 }
 

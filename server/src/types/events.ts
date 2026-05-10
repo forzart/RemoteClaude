@@ -9,7 +9,7 @@ export type ClientMessage =
 
 export interface NewSessionMessage {
   type: 'new_session';
-  cwd: string;
+  sessionName: string;
   content?: string;
 }
 
@@ -35,6 +35,7 @@ export type ServerMessage =
 export interface SessionStartMessage {
   type: 'session_start';
   sessionId: string;
+  sessionName: string;
 }
 
 export interface SDKEventMessage {
@@ -61,8 +62,8 @@ export function parseClientMessage(raw: string): ClientMessage {
   }
   switch (data.type) {
     case 'new_session':
-      if (typeof data.cwd !== 'string' || data.cwd.length === 0) {
-        throw new Error('new_session: cwd must be a non-empty string');
+      if (typeof data.sessionName !== 'string' || data.sessionName.length === 0) {
+        throw new Error('new_session: sessionName must be a non-empty string');
       }
       return data as NewSessionMessage;
     case 'message':

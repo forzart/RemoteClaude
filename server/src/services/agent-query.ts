@@ -1,7 +1,8 @@
 import { query, type SDKMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 
 function findClaudeExecutable(): string | undefined {
   const candidates = [
@@ -17,9 +18,15 @@ function findClaudeExecutable(): string | undefined {
 
 const claudePath = findClaudeExecutable();
 
+export const SESSIONS_ROOT = resolve(homedir(), '.remote-claude', 'sessions');
+
+export function sessionCwd(sessionName: string): string {
+  return resolve(SESSIONS_ROOT, sessionName);
+}
+
 export interface NewSessionParams {
   prompt: string;
-  cwd: string;
+  sessionName: string;
   abortController: AbortController;
 }
 
@@ -36,10 +43,12 @@ export interface QueryHandle {
 
 export function startNewSession(params: NewSessionParams): QueryHandle {
   const sessionId = randomUUID();
+  const cwd = sessionCwd(params.sessionName);
+  mkdirSync(cwd, { recursive: true });
   const generator = query({
     prompt: params.prompt,
     options: {
-      cwd: params.cwd,
+      cwd,
       sessionId,
       tools: { type: 'preset', preset: 'claude_code' },
       permissionMode: 'bypassPermissions',

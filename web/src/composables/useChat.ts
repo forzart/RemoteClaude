@@ -10,7 +10,7 @@ export interface UseChatReturn {
   messages: Ref<DisplayMessage[]>;
   isStreaming: Ref<boolean>;
   sendMessage: (sessionId: string, content: string) => void;
-  createSession: (cwd: string, content?: string) => void;
+  createSession: (sessionName: string, content?: string) => void;
   abort: (sessionId: string) => void;
   clearMessages: () => void;
 }
@@ -244,7 +244,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
     ws.send({ type: 'message', sessionId, content });
   }
 
-  function createSession(cwd: string, content?: string) {
+  function createSession(sessionName: string, content?: string) {
     if (content) {
       const userMsg: DisplayMessage = {
         id: genId(),
@@ -255,7 +255,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
       messages.value.push(userMsg);
       isStreaming.value = true;
     }
-    ws.send({ type: 'new_session', cwd, content });
+    ws.send({ type: 'new_session', sessionName, content });
   }
 
   function abort(sessionId: string) {

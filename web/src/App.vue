@@ -15,7 +15,7 @@
     <div class="main">
       <SessionSidebar
         :sessions="sessionStore.sessions.value"
-        :current-session-id="sessionStore.currentSessionId.value"
+        :current-session-name="sessionStore.currentSessionName.value"
         :open="sidebarOpen"
         @switch="handleSwitchSession"
         @delete="handleDeleteSession"
@@ -80,18 +80,18 @@ onUnmounted(() => {
   ws.disconnect();
 });
 
-function handleNewSession(cwd: string, content?: string) {
+function handleNewSession(sessionName: string, content?: string) {
   chat.clearMessages();
-  chat.createSession(cwd, content);
+  chat.createSession(sessionName, content);
 }
 
-function handleSwitchSession(id: string) {
-  sessionStore.switchSession(id);
+function handleSwitchSession(sessionName: string) {
+  sessionStore.switchSession(sessionName);
   chat.clearMessages();
 }
 
-async function handleDeleteSession(id: string) {
-  await sessionStore.deleteSession(id);
+async function handleDeleteSession(sessionName: string) {
+  await sessionStore.deleteSession(sessionName);
 }
 
 function handleSend(content: string) {
@@ -108,7 +108,7 @@ function handleAbort() {
   }
 }
 
-function handleSettingsSave(_settings: { wsUrl: string; defaultCwd: string }) {
+function handleSettingsSave(_settings: { wsUrl: string }) {
   location.reload();
 }
 </script>

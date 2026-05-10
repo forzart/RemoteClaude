@@ -41,7 +41,7 @@ async function handleMessage(
 
   switch (msg.type) {
     case 'new_session':
-      await handleNewSession(ws, msg.cwd, msg.content, sessionManager);
+      await handleNewSession(ws, msg.sessionName, msg.content, sessionManager);
       break;
     case 'message':
       await handleChatMessage(ws, msg.sessionId, msg.content, sessionManager);
@@ -54,7 +54,7 @@ async function handleMessage(
 
 async function handleNewSession(
   ws: WebSocket,
-  cwd: string,
+  sessionName: string,
   content: string | undefined,
   sessionManager: SessionManager,
 ): Promise<void> {
@@ -64,7 +64,7 @@ async function handleNewSession(
   try {
     handle = startNewSession({
       prompt: content || '',
-      cwd,
+      sessionName,
       abortController,
     });
   } catch (err) {
@@ -78,7 +78,7 @@ async function handleNewSession(
   const { sessionId, generator } = handle;
   sessionManager.register(sessionId, abortController);
 
-  send(ws, { type: 'session_start', sessionId });
+  send(ws, { type: 'session_start', sessionId, sessionName });
 
   await streamEvents(ws, sessionId, generator, sessionManager);
 }

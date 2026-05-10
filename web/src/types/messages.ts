@@ -39,9 +39,8 @@ export interface ToolResultBlock {
 }
 
 export interface SessionInfo {
-  sessionId: string;
-  summary: string;
-  lastModified: number;
+  sessionName: string;
+  createdAt: number;
 }
 
 // --- Server → Client messages (mirrors server/src/types/events.ts) ---
@@ -49,6 +48,7 @@ export interface SessionInfo {
 export interface SessionStartMessage {
   type: 'session_start';
   sessionId: string;
+  sessionName: string;
 }
 
 export interface SDKEventMessage {

@@ -55,12 +55,12 @@ describe('WebSocket /ws/chat', () => {
     ws.close();
   });
 
-  it('returns error for new_session without cwd', async () => {
+  it('returns error for new_session without sessionName', async () => {
     const ws = await connectWs();
     ws.send(JSON.stringify({ type: 'new_session' }));
     const response = await receiveMessage(ws);
     expect(response.type).toBe('error');
-    expect(response.message).toContain('cwd');
+    expect(response.message).toContain('sessionName');
     ws.close();
   });
 
