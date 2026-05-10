@@ -109,13 +109,7 @@ function handleAbort() {
 }
 
 function handleSettingsSave(_settings: { wsUrl: string; defaultCwd: string }) {
-  // Reconnect with new URL if changed
-  ws.disconnect();
-  const newWs = getWsUrl();
-  // For simplicity, reload the page to apply new WebSocket URL
-  if (_settings.wsUrl) {
-    location.reload();
-  }
+  location.reload();
 }
 </script>
 

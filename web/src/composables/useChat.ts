@@ -25,6 +25,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
   const isStreaming = ref(false);
   let currentAssistant: DisplayMessage | null = null;
   let streamingText = '';
+  let toolInputJson = '';
 
   ws.onMessage((msg: ServerMessage) => {
     switch (msg.type) {
@@ -115,6 +116,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
         const block = streamEvent.content_block;
         if (block?.type === 'tool_use') {
           ensureAssistantMessage();
+          toolInputJson = '';
           const toolBlock: ToolUseBlock = {
             type: 'tool_use',
             toolUseId: (block as Record<string, unknown>).id as string || '',
@@ -137,20 +139,28 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
           streamingText += delta.text;
           updateOrPushStreamingText();
         } else if (delta?.type === 'input_json_delta') {
-          // Tool input streaming — accumulate JSON
-          const text = (delta as Record<string, unknown>).partial_json as string;
-          if (text && currentAssistant) {
-            const lastTool = [...currentAssistant.blocks].reverse().find(
-              (b): b is ToolUseBlock => b.type === 'tool_use'
-            );
-            if (lastTool) {
-              // We'll parse the complete input from the assistant message later
-            }
+          const partial = (delta as Record<string, unknown>).partial_json as string;
+          if (partial) {
+            toolInputJson += partial;
           }
         }
         break;
       }
       case 'content_block_stop':
+        if (toolInputJson && currentAssistant) {
+          const lastTool = [...currentAssistant.blocks].reverse().find(
+            (b): b is ToolUseBlock => b.type === 'tool_use'
+          );
+          if (lastTool) {
+            try {
+              lastTool.input = JSON.parse(toolInputJson);
+            } catch {
+              // malformed JSON, keep empty input
+            }
+            triggerReactivity();
+          }
+          toolInputJson = '';
+        }
         streamingText = '';
         break;
       case 'message_stop':
@@ -256,6 +266,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
     messages.value = [];
     currentAssistant = null;
     streamingText = '';
+    toolInputJson = '';
     isStreaming.value = false;
   }
 

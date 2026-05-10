@@ -17,6 +17,7 @@ export function useWebSocket(url: Ref<string> | string): UseWebSocketReturn {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectDelay = 1000;
   const maxReconnectDelay = 30000;
+  let manualDisconnect = false;
   const handlers: Array<(msg: ServerMessage) => void> = [];
 
   function onMessage(handler: (msg: ServerMessage) => void) {
@@ -34,6 +35,7 @@ export function useWebSocket(url: Ref<string> | string): UseWebSocketReturn {
       ws.close();
     }
 
+    manualDisconnect = false;
     const wsUrl = typeof url === 'string' ? url : url.value;
     status.value = 'connecting';
     ws = new WebSocket(wsUrl);
@@ -57,7 +59,9 @@ export function useWebSocket(url: Ref<string> | string): UseWebSocketReturn {
     ws.onclose = () => {
       status.value = 'disconnected';
       ws = null;
-      scheduleReconnect();
+      if (!manualDisconnect) {
+        scheduleReconnect();
+      }
     };
 
     ws.onerror = () => {
@@ -66,6 +70,7 @@ export function useWebSocket(url: Ref<string> | string): UseWebSocketReturn {
   }
 
   function disconnect() {
+    manualDisconnect = true;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;

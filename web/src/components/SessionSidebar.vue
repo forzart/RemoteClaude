@@ -16,7 +16,7 @@
         <div class="session-meta">{{ formatTime(session.lastModified) }}</div>
         <button
           class="session-delete"
-          @click.stop="$emit('delete', session.sessionId)"
+          @click.stop="confirmDelete(session.sessionId)"
           title="Delete session"
         >×</button>
       </div>
@@ -51,6 +51,12 @@ function promptNewSession() {
   if (!cwd) return;
   const content = window.prompt('Initial message (optional):', '');
   emit('new-session', cwd, content || undefined);
+}
+
+function confirmDelete(id: string) {
+  if (window.confirm('Delete this session?')) {
+    emit('delete', id);
+  }
 }
 
 function formatTime(ts: number): string {

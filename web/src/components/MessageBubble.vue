@@ -41,6 +41,14 @@ const md = new MarkdownIt({
   breaks: true,
 });
 
+// Override fence renderer to style code blocks with language label and copy button
+md.renderer.rules.fence = (tokens, idx) => {
+  const token = tokens[idx];
+  const lang = token.info.trim() || 'text';
+  const escaped = md.utils.escapeHtml(token.content);
+  return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${md.utils.escapeHtml(lang)}</span></div><pre><code>${escaped}</code></pre></div>`;
+};
+
 const userText = computed(() => {
   const textBlock = props.message.blocks.find(b => b.type === 'text');
   return textBlock && textBlock.type === 'text' ? textBlock.text : '';
@@ -95,11 +103,34 @@ function renderMarkdown(text: string): string {
 }
 
 .assistant-text :deep(pre) {
-  background: var(--bg-surface);
+  background: var(--bg-primary);
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.assistant-text :deep(.md-code-block) {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
   margin: 8px 0;
+}
+
+.assistant-text :deep(.md-code-header) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.assistant-text :deep(.md-code-lang) {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .assistant-text :deep(ul),
