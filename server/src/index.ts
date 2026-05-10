@@ -1,9 +1,14 @@
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
+import cors from '@fastify/cors';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { registerWsRoute } from './routes/ws.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { SessionManager } from './services/session-manager.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -11,12 +16,26 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: true });
   const sessionManager = new SessionManager();
 
+  await app.register(cors, { origin: true });
   await app.register(websocket);
 
   registerWsRoute(app, sessionManager);
   registerSessionRoutes(app);
 
   app.get('/health', async () => ({ status: 'ok' }));
+
+  // Serve web client static files (after API routes so they take priority)
+  const webDistPath = resolve(__dirname, '../../web/dist');
+  await app.register(fastifyStatic, {
+    root: webDistPath,
+    prefix: '/',
+    wildcard: false,
+  });
+
+  // SPA fallback: serve index.html for unmatched routes
+  app.setNotFoundHandler(async (_request, reply) => {
+    return reply.sendFile('index.html', webDistPath);
+  });
 
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}, shutting down...`);
