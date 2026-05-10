@@ -10,6 +10,7 @@ export type ClientMessage =
 export interface NewSessionMessage {
   type: 'new_session';
   cwd: string;
+  content?: string;
 }
 
 export interface ChatMessage {
