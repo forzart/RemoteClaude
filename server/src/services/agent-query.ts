@@ -1,5 +1,21 @@
 import { query, type SDKMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'crypto';
+import { resolve } from 'path';
+import { existsSync } from 'fs';
+
+function findClaudeExecutable(): string | undefined {
+  const candidates = [
+    process.env.CLAUDE_CODE_PATH,
+    resolve(process.env.LOCALAPPDATA || '', 'AnthropicClaude/app-0.13.11/claude.exe'),
+    resolve(process.env.LOCALAPPDATA || '', 'AnthropicClaude/claude.exe'),
+  ];
+  for (const p of candidates) {
+    if (p && existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+const claudePath = findClaudeExecutable();
 
 export interface NewSessionParams {
   prompt: string;
@@ -30,6 +46,7 @@ export function startNewSession(params: NewSessionParams): QueryHandle {
       allowDangerouslySkipPermissions: true,
       abortController: params.abortController,
       includePartialMessages: true,
+      ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
     },
   });
   return { sessionId, generator };
@@ -44,6 +61,7 @@ export function resumeSession(params: ResumeSessionParams): QueryHandle {
       allowDangerouslySkipPermissions: true,
       abortController: params.abortController,
       includePartialMessages: true,
+      ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
     },
   });
   return { sessionId: params.sessionId, generator };
