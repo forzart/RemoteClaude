@@ -37,26 +37,26 @@ cd RemoteClaude
 cd server && npm install && cd ..
 cd web && npm install && cd ..
 
-# Start server (port 3000)
-cd server && npm run build && npm start
-
-# In another terminal — start web dev server (port 5173)
-cd web && npm run dev
-```
-
-Open http://localhost:5173 in your browser.
-
-### Production Build
-
-```bash
-# Build web client
-cd web && npm run build
-
-# The server serves web/dist as static files
+# Build everything and start
+cd web && npm run build && cd ..
 cd server && npm run build && npm start
 ```
 
 Open http://localhost:3000 — the server serves both the API and the web client.
+
+### Development Mode
+
+For frontend development with hot reload:
+
+```bash
+# Terminal 1 — start the server
+cd server && npm run dev
+
+# Terminal 2 — start Vite dev server (proxies API/WebSocket to :3000)
+cd web && npm run dev
+```
+
+Open http://localhost:5173. Changes to Vue files will hot-reload instantly.
 
 ## Project Structure
 
