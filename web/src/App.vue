@@ -9,7 +9,6 @@
         <span class="connection-status" :class="wsStatus">
           {{ statusText }}
         </span>
-        <button class="btn-icon" @click="settingsOpen = true">⚙</button>
       </div>
     </div>
     <div class="main">
@@ -19,22 +18,16 @@
         :open="sidebarOpen"
         @switch="handleSwitchSession"
         @delete="handleDeleteSession"
-        @settings="settingsOpen = true"
         @new-session="handleNewSession"
       />
       <ChatView
         :messages="chat.messages.value"
         :is-streaming="chat.isStreaming.value"
-        :has-session="!!sessionStore.currentSessionId.value"
+        :has-session="!!sessionStore.currentSessionName.value"
         @send="handleSend"
         @abort="handleAbort"
       />
     </div>
-    <SettingsModal
-      :open="settingsOpen"
-      @close="settingsOpen = false"
-      @save="handleSettingsSave"
-    />
   </div>
 </template>
 
@@ -45,14 +38,10 @@ import { useChat } from './composables/useChat.js';
 import { useSessions } from './composables/useSessions.js';
 import SessionSidebar from './components/SessionSidebar.vue';
 import ChatView from './components/ChatView.vue';
-import SettingsModal from './components/SettingsModal.vue';
 
 const sidebarOpen = ref(true);
-const settingsOpen = ref(false);
 
 function getWsUrl(): string {
-  const saved = localStorage.getItem('rc_ws_url');
-  if (saved) return saved;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}/ws/chat`;
 }
@@ -80,14 +69,18 @@ onUnmounted(() => {
   ws.disconnect();
 });
 
-function handleNewSession(sessionName: string, content?: string) {
+function handleNewSession(sessionName: string) {
   chat.clearMessages();
-  chat.createSession(sessionName, content);
+  chat.createSession(sessionName);
 }
 
-function handleSwitchSession(sessionName: string) {
-  sessionStore.switchSession(sessionName);
+async function handleSwitchSession(sessionName: string) {
   chat.clearMessages();
+  const history = await sessionStore.loadHistory(sessionName);
+  if (history.messages.length > 0) {
+    chat.loadFromHistory(history.messages);
+  }
+  chat.createSession(sessionName);
 }
 
 async function handleDeleteSession(sessionName: string) {
@@ -95,22 +88,19 @@ async function handleDeleteSession(sessionName: string) {
 }
 
 function handleSend(content: string) {
-  const sessionId = sessionStore.currentSessionId.value;
-  if (sessionId) {
-    chat.sendMessage(sessionId, content);
+  const sessionName = sessionStore.currentSessionName.value;
+  if (sessionName) {
+    chat.sendMessage(sessionName, content);
   }
 }
 
 function handleAbort() {
-  const sessionId = sessionStore.currentSessionId.value;
-  if (sessionId) {
-    chat.abort(sessionId);
+  const sessionName = sessionStore.currentSessionName.value;
+  if (sessionName) {
+    chat.abort(sessionName);
   }
 }
 
-function handleSettingsSave(_settings: { wsUrl: string }) {
-  location.reload();
-}
 </script>
 
 <style scoped>
@@ -164,14 +154,6 @@ function handleSettingsSave(_settings: { wsUrl: string }) {
 .connection-status.connecting { color: var(--text-secondary); }
 .connection-status.disconnected { color: var(--text-muted); }
 .connection-status.error { color: var(--color-error); }
-
-.btn-icon {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 16px;
-  padding: 4px;
-}
 
 .main {
   flex: 1;

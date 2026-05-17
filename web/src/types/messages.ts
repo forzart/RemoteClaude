@@ -47,24 +47,23 @@ export interface SessionInfo {
 
 export interface SessionStartMessage {
   type: 'session_start';
-  sessionId: string;
   sessionName: string;
 }
 
 export interface SDKEventMessage {
   type: 'sdk_event';
-  sessionId: string;
+  sessionName: string;
   event: SDKEvent;
 }
 
 export interface DoneMessage {
   type: 'done';
-  sessionId: string;
+  sessionName: string;
 }
 
 export interface ErrorMessage {
   type: 'error';
-  sessionId?: string;
+  sessionName?: string;
   message: string;
 }
 

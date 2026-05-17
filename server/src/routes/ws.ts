@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
+import { randomUUID } from 'crypto';
 import { parseClientMessage, type ServerMessage } from '../types/events.js';
-import { startNewSession, resumeSession } from '../services/agent-query.js';
+import { startNewSession, resumeSession, sessionCwd } from '../services/agent-query.js';
 import { SessionManager } from '../services/session-manager.js';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { ConfigCache, updateCacheFromQuery } from '../services/config-cache.js';
+import { mkdirSync } from 'fs';
+import { listSessions, type Query } from '@anthropic-ai/claude-agent-sdk';
 
 function send(ws: WebSocket, msg: ServerMessage): void {
   if (ws.readyState === ws.OPEN) {
@@ -11,15 +14,13 @@ function send(ws: WebSocket, msg: ServerMessage): void {
   }
 }
 
-export function registerWsRoute(app: FastifyInstance, sessionManager: SessionManager): void {
+export function registerWsRoute(app: FastifyInstance, sessionManager: SessionManager, configCache: ConfigCache): void {
   app.get('/ws/chat', { websocket: true }, (socket: WebSocket, _request: FastifyRequest) => {
     socket.on('message', (raw: Buffer) => {
-      void handleMessage(socket, raw.toString(), sessionManager);
+      void handleMessage(socket, raw.toString(), sessionManager, configCache);
     });
 
-    socket.on('close', () => {
-      // Client disconnected — abort is handled per-session, not per-connection
-    });
+    socket.on('close', () => {});
   });
 }
 
@@ -27,6 +28,7 @@ async function handleMessage(
   ws: WebSocket,
   raw: string,
   sessionManager: SessionManager,
+  configCache: ConfigCache,
 ): Promise<void> {
   let msg;
   try {
@@ -41,13 +43,13 @@ async function handleMessage(
 
   switch (msg.type) {
     case 'new_session':
-      await handleNewSession(ws, msg.sessionName, msg.content, sessionManager);
+      await handleNewSession(ws, msg.sessionName, sessionManager);
       break;
     case 'message':
-      await handleChatMessage(ws, msg.sessionId, msg.content, sessionManager);
+      await handleChatMessage(ws, msg.sessionName, msg.content, sessionManager, configCache);
       break;
     case 'abort':
-      sessionManager.abort(msg.sessionId);
+      sessionManager.abort(msg.sessionName);
       break;
   }
 }
@@ -55,83 +57,91 @@ async function handleMessage(
 async function handleNewSession(
   ws: WebSocket,
   sessionName: string,
-  content: string | undefined,
   sessionManager: SessionManager,
 ): Promise<void> {
-  const abortController = new AbortController();
+  const cwd = sessionCwd(sessionName);
+  mkdirSync(cwd, { recursive: true });
 
-  let handle;
+  let sessionId: string;
+  let isResume = false;
   try {
-    handle = startNewSession({
-      prompt: content || '',
-      sessionName,
-      abortController,
-    });
-  } catch (err) {
-    send(ws, {
-      type: 'error',
-      message: err instanceof Error ? err.message : 'Failed to create session',
-    });
-    return;
+    const sessions = await listSessions({ dir: cwd });
+    if (sessions.length > 0) {
+      const latest = sessions.sort((a, b) => b.lastModified - a.lastModified)[0];
+      sessionId = latest.sessionId;
+      isResume = true;
+    } else {
+      sessionId = randomUUID();
+    }
+  } catch {
+    sessionId = randomUUID();
   }
 
-  const { sessionId, generator } = handle;
-  sessionManager.register(sessionId, abortController);
-
-  send(ws, { type: 'session_start', sessionId, sessionName });
-
-  await streamEvents(ws, sessionId, generator, sessionManager);
+  sessionManager.registerPending(sessionName, sessionId, isResume);
+  send(ws, { type: 'session_start', sessionName });
 }
 
 async function handleChatMessage(
   ws: WebSocket,
-  sessionId: string,
+  sessionName: string,
   content: string,
   sessionManager: SessionManager,
+  configCache: ConfigCache,
 ): Promise<void> {
-  if (sessionManager.isActive(sessionId)) {
+  if (sessionManager.isActive(sessionName)) {
     send(ws, {
       type: 'error',
-      sessionId,
+      sessionName,
       message: 'A query is already running for this session. Send abort first.',
     });
     return;
   }
 
   const abortController = new AbortController();
-  sessionManager.register(sessionId, abortController);
+  const pending = sessionManager.consumePending(sessionName);
 
-  const { generator } = resumeSession({
-    prompt: content,
-    sessionId,
-    abortController,
-  });
+  if (!pending) {
+    send(ws, { type: 'error', sessionName, message: 'No pending session. Send new_session first.' });
+    return;
+  }
 
-  await streamEvents(ws, sessionId, generator, sessionManager);
+  const { sessionId, isResume } = pending;
+  sessionManager.register(sessionName, sessionId, abortController);
+
+  const handle = isResume
+    ? resumeSession({ prompt: content, sessionId, sessionName, abortController })
+    : startNewSession({ prompt: content, sessionId, sessionName, abortController });
+
+  await streamEvents(ws, sessionName, sessionId, handle.generator, sessionManager, configCache);
 }
 
 async function streamEvents(
   ws: WebSocket,
+  sessionName: string,
   sessionId: string,
-  generator: AsyncGenerator<SDKMessage, void>,
+  generator: Query,
   sessionManager: SessionManager,
+  configCache: ConfigCache,
 ): Promise<void> {
   try {
+    void updateCacheFromQuery(generator, configCache);
+
     for await (const event of generator) {
-      send(ws, { type: 'sdk_event', sessionId, event });
+      send(ws, { type: 'sdk_event', sessionName, event });
     }
-    send(ws, { type: 'done', sessionId });
+    send(ws, { type: 'done', sessionName });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      send(ws, { type: 'done', sessionId });
+      send(ws, { type: 'done', sessionName });
     } else {
       send(ws, {
         type: 'error',
-        sessionId,
+        sessionName,
         message: err instanceof Error ? err.message : 'Query failed',
       });
     }
   } finally {
-    sessionManager.unregister(sessionId);
+    sessionManager.unregister(sessionName);
+    sessionManager.registerPending(sessionName, sessionId, true);
   }
 }

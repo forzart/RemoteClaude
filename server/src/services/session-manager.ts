@@ -1,33 +1,62 @@
+interface ActiveEntry {
+  controller: AbortController;
+  sessionId: string;
+}
+
+interface PendingEntry {
+  sessionId: string;
+  isResume: boolean;
+}
+
 export class SessionManager {
-  private active = new Map<string, AbortController>();
+  private active = new Map<string, ActiveEntry>();
+  private pending = new Map<string, PendingEntry>();
 
-  register(sessionId: string, controller: AbortController): void {
-    const existing = this.active.get(sessionId);
+  registerPending(sessionName: string, sessionId: string, isResume = false): void {
+    this.pending.set(sessionName, { sessionId, isResume });
+  }
+
+  isPending(sessionName: string): boolean {
+    return this.pending.has(sessionName);
+  }
+
+  consumePending(sessionName: string): PendingEntry | undefined {
+    const entry = this.pending.get(sessionName);
+    if (entry) this.pending.delete(sessionName);
+    return entry;
+  }
+
+  register(sessionName: string, sessionId: string, controller: AbortController): void {
+    const existing = this.active.get(sessionName);
     if (existing) {
-      existing.abort();
+      existing.controller.abort();
     }
-    this.active.set(sessionId, controller);
+    this.active.set(sessionName, { controller, sessionId });
   }
 
-  isActive(sessionId: string): boolean {
-    return this.active.has(sessionId);
+  getSessionId(sessionName: string): string | undefined {
+    return this.active.get(sessionName)?.sessionId ?? this.pending.get(sessionName)?.sessionId;
   }
 
-  abort(sessionId: string): void {
-    const controller = this.active.get(sessionId);
-    if (controller) {
-      controller.abort();
-      this.active.delete(sessionId);
+  isActive(sessionName: string): boolean {
+    return this.active.has(sessionName);
+  }
+
+  abort(sessionName: string): void {
+    const entry = this.active.get(sessionName);
+    if (entry) {
+      entry.controller.abort();
+      this.active.delete(sessionName);
     }
   }
 
-  unregister(sessionId: string): void {
-    this.active.delete(sessionId);
+  unregister(sessionName: string): void {
+    this.active.delete(sessionName);
   }
 
   abortAll(): void {
-    for (const [, controller] of this.active) {
-      controller.abort();
+    for (const [, entry] of this.active) {
+      entry.controller.abort();
     }
     this.active.clear();
   }

@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
 import { registerWsRoute } from './ws.js';
 import { SessionManager } from '../services/session-manager.js';
+import { ConfigCache } from '../services/config-cache.js';
 
 describe('WebSocket /ws/chat', () => {
   let app: FastifyInstance;
@@ -12,8 +13,9 @@ describe('WebSocket /ws/chat', () => {
   beforeAll(async () => {
     app = Fastify();
     const sessionManager = new SessionManager();
+    const configCache = new ConfigCache();
     await app.register(websocket);
-    registerWsRoute(app, sessionManager);
+    registerWsRoute(app, sessionManager, configCache);
     address = await app.listen({ port: 0, host: '127.0.0.1' });
   });
 
@@ -64,12 +66,12 @@ describe('WebSocket /ws/chat', () => {
     ws.close();
   });
 
-  it('returns error for message without sessionId', async () => {
+  it('returns error for message without sessionName', async () => {
     const ws = await connectWs();
     ws.send(JSON.stringify({ type: 'message', content: 'hello' }));
     const response = await receiveMessage(ws);
     expect(response.type).toBe('error');
-    expect(response.message).toContain('sessionId');
+    expect(response.message).toContain('sessionName');
     ws.close();
   });
 });

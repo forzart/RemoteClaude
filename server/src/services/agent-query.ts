@@ -1,24 +1,12 @@
 import { query, type SDKMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
-import { existsSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
+import { mkdirSync, rmSync } from 'fs';
+import { homedir, tmpdir } from 'os';
+import { ConfigCache, updateCacheFromQuery } from './config-cache.js';
 
-function findClaudeExecutable(): string | undefined {
-  const candidates = [
-    process.env.CLAUDE_CODE_PATH,
-    resolve(process.env.LOCALAPPDATA || '', 'AnthropicClaude/app-0.13.11/claude.exe'),
-    resolve(process.env.LOCALAPPDATA || '', 'AnthropicClaude/claude.exe'),
-  ];
-  for (const p of candidates) {
-    if (p && existsSync(p)) return p;
-  }
-  return undefined;
-}
-
-const claudePath = findClaudeExecutable();
-
-export const SESSIONS_ROOT = resolve(homedir(), '.remote-claude', 'sessions');
+const REMOTE_CLAUDE_HOME = resolve(homedir(), '.remoteclaude');
+export const SESSIONS_ROOT = resolve(REMOTE_CLAUDE_HOME, 'cwd');
 
 export function sessionCwd(sessionName: string): string {
   return resolve(SESSIONS_ROOT, sessionName);
@@ -26,6 +14,7 @@ export function sessionCwd(sessionName: string): string {
 
 export interface NewSessionParams {
   prompt: string;
+  sessionId: string;
   sessionName: string;
   abortController: AbortController;
 }
@@ -33,6 +22,7 @@ export interface NewSessionParams {
 export interface ResumeSessionParams {
   prompt: string;
   sessionId: string;
+  sessionName: string;
   abortController: AbortController;
 }
 
@@ -41,37 +31,59 @@ export interface QueryHandle {
   generator: Query;
 }
 
+function buildCommonOptions(abortController: AbortController): Record<string, unknown> {
+  return {
+    tools: { type: 'preset', preset: 'claude_code' },
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    abortController,
+    includePartialMessages: true,
+  };
+}
+
 export function startNewSession(params: NewSessionParams): QueryHandle {
-  const sessionId = randomUUID();
   const cwd = sessionCwd(params.sessionName);
   mkdirSync(cwd, { recursive: true });
   const generator = query({
     prompt: params.prompt,
     options: {
       cwd,
-      sessionId,
-      tools: { type: 'preset', preset: 'claude_code' },
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      abortController: params.abortController,
-      includePartialMessages: true,
-      ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
+      sessionId: params.sessionId,
+      ...buildCommonOptions(params.abortController),
     },
   });
-  return { sessionId, generator };
+  return { sessionId: params.sessionId, generator };
 }
 
 export function resumeSession(params: ResumeSessionParams): QueryHandle {
   const generator = query({
     prompt: params.prompt,
     options: {
+      cwd: sessionCwd(params.sessionName),
       resume: params.sessionId,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      abortController: params.abortController,
-      includePartialMessages: true,
-      ...(claudePath && { pathToClaudeCodeExecutable: claudePath }),
+      ...buildCommonOptions(params.abortController),
     },
   });
   return { sessionId: params.sessionId, generator };
+}
+
+export async function probeConfig(configCache: ConfigCache): Promise<void> {
+  const probeCwd = resolve(tmpdir(), 'remoteclaude-config-probe');
+  mkdirSync(probeCwd, { recursive: true });
+  const controller = new AbortController();
+  const generator = query({
+    prompt: 'hi',
+    options: {
+      cwd: probeCwd,
+      ...buildCommonOptions(controller),
+    },
+  });
+  try {
+    await updateCacheFromQuery(generator, configCache);
+  } finally {
+    controller.abort();
+    setTimeout(() => {
+      try { rmSync(probeCwd, { recursive: true, force: true }); } catch {}
+    }, 3000);
+  }
 }

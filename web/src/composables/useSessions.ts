@@ -2,29 +2,43 @@ import { ref, type Ref } from 'vue';
 import type { SessionInfo, ServerMessage } from '../types/messages.js';
 import type { UseWebSocketReturn } from './useWebSocket.js';
 
+export interface HistoryMessage {
+  type: 'user' | 'assistant';
+  message: {
+    role: string;
+    content: Array<{
+      type: string;
+      text?: string;
+      id?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+      tool_use_id?: string;
+      content?: unknown;
+      is_error?: boolean;
+    }>;
+  };
+}
+
+export interface SessionHistory {
+  messages: HistoryMessage[];
+}
+
 export interface UseSessionsReturn {
   sessions: Ref<SessionInfo[]>;
-  currentSessionId: Ref<string | null>;
   currentSessionName: Ref<string | null>;
   loadSessions: () => Promise<void>;
+  loadHistory: (sessionName: string) => Promise<SessionHistory>;
   switchSession: (sessionName: string) => void;
   deleteSession: (sessionName: string) => Promise<void>;
-  onSessionCreated: (handler: (sessionId: string) => void) => void;
 }
 
 export function useSessions(ws: UseWebSocketReturn): UseSessionsReturn {
   const sessions = ref<SessionInfo[]>([]);
-  const currentSessionId = ref<string | null>(null);
   const currentSessionName = ref<string | null>(null);
-  const sessionCreatedHandlers: Array<(sessionId: string) => void> = [];
 
   ws.onMessage((msg: ServerMessage) => {
     if (msg.type === 'session_start') {
-      currentSessionId.value = msg.sessionId;
       currentSessionName.value = msg.sessionName;
-      for (const handler of sessionCreatedHandlers) {
-        handler(msg.sessionId);
-      }
       void loadSessions();
     }
   });
@@ -40,13 +54,24 @@ export function useSessions(ws: UseWebSocketReturn): UseSessionsReturn {
         }));
       }
     } catch {
-      // silently fail — sidebar will show empty list
+      // sidebar will show empty list
     }
+  }
+
+  async function loadHistory(sessionName: string): Promise<SessionHistory> {
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/history`);
+      if (response.ok) {
+        return await response.json() as SessionHistory;
+      }
+    } catch {
+      // fall through
+    }
+    return { messages: [] };
   }
 
   function switchSession(sessionName: string) {
     currentSessionName.value = sessionName;
-    currentSessionId.value = null;
   }
 
   async function deleteSession(sessionName: string): Promise<void> {
@@ -54,7 +79,6 @@ export function useSessions(ws: UseWebSocketReturn): UseSessionsReturn {
       await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`, { method: 'DELETE' });
       sessions.value = sessions.value.filter(s => s.sessionName !== sessionName);
       if (currentSessionName.value === sessionName) {
-        currentSessionId.value = null;
         currentSessionName.value = null;
       }
     } catch {
@@ -62,9 +86,5 @@ export function useSessions(ws: UseWebSocketReturn): UseSessionsReturn {
     }
   }
 
-  function onSessionCreated(handler: (sessionId: string) => void) {
-    sessionCreatedHandlers.push(handler);
-  }
-
-  return { sessions, currentSessionId, currentSessionName, loadSessions, switchSession, deleteSession, onSessionCreated };
+  return { sessions, currentSessionName, loadSessions, loadHistory, switchSession, deleteSession };
 }

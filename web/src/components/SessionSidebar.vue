@@ -24,9 +24,6 @@
         No sessions yet
       </div>
     </div>
-    <div class="sidebar-footer">
-      <button class="btn-settings" @click="$emit('settings')">⚙ Settings</button>
-    </div>
   </div>
 </template>
 
@@ -42,15 +39,13 @@ defineProps<{
 const emit = defineEmits<{
   switch: [sessionName: string];
   delete: [sessionName: string];
-  settings: [];
-  'new-session': [sessionName: string, content?: string];
+  'new-session': [sessionName: string];
 }>();
 
 function promptNewSession() {
   const sessionName = window.prompt('Session name:', '');
   if (!sessionName) return;
-  const content = window.prompt('Initial message (optional):', '');
-  emit('new-session', sessionName, content || undefined);
+  emit('new-session', sessionName);
 }
 
 function confirmDelete(sessionName: string) {
@@ -175,20 +170,4 @@ function formatTime(ts: number): string {
   text-align: center;
 }
 
-.sidebar-footer {
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-}
-
-.btn-settings {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 11px;
-  padding: 4px 0;
-}
-
-.btn-settings:hover {
-  color: var(--text-primary);
-}
 </style>

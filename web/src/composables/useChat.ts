@@ -1,17 +1,20 @@
 import { ref, type Ref } from 'vue';
 import type {
   DisplayMessage,
+  ContentBlock,
   ToolUseBlock,
   ServerMessage,
 } from '../types/messages.js';
 import type { UseWebSocketReturn } from './useWebSocket.js';
+import type { HistoryMessage } from './useSessions.js';
 
 export interface UseChatReturn {
   messages: Ref<DisplayMessage[]>;
   isStreaming: Ref<boolean>;
-  sendMessage: (sessionId: string, content: string) => void;
-  createSession: (sessionName: string, content?: string) => void;
-  abort: (sessionId: string) => void;
+  sendMessage: (sessionName: string, content: string) => void;
+  createSession: (sessionName: string) => void;
+  loadFromHistory: (historyMessages: HistoryMessage[]) => void;
+  abort: (sessionName: string) => void;
   clearMessages: () => void;
 }
 
@@ -23,14 +26,13 @@ function genId(): string {
 export function useChat(ws: UseWebSocketReturn): UseChatReturn {
   const messages = ref<DisplayMessage[]>([]);
   const isStreaming = ref(false);
-  let currentAssistant: DisplayMessage | null = null;
+  let currentAssistantId: string | null = null;
   let streamingText = '';
   let toolInputJson = '';
 
   ws.onMessage((msg: ServerMessage) => {
     switch (msg.type) {
       case 'session_start':
-        // Session created, nothing to render yet
         break;
       case 'sdk_event':
         handleSDKEvent(msg.event);
@@ -44,6 +46,11 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
     }
   });
 
+  function getCurrentAssistant(): DisplayMessage | undefined {
+    if (!currentAssistantId) return undefined;
+    return messages.value.find(m => m.id === currentAssistantId);
+  }
+
   function handleSDKEvent(event: { type: string; [key: string]: unknown }) {
     switch (event.type) {
       case 'assistant':
@@ -53,7 +60,6 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
         handleStreamEvent(event);
         break;
       case 'tool_progress':
-        handleToolProgress(event);
         break;
       case 'result':
         finalizeStreaming();
@@ -68,6 +74,8 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
     if (!message?.content) return;
 
     ensureAssistantMessage();
+    const assistant = getCurrentAssistant();
+    if (!assistant) return;
 
     for (const block of message.content) {
       if (block.type === 'text' && block.text) {
@@ -80,7 +88,7 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
           input: block.input || {},
           status: 'running',
         };
-        currentAssistant!.blocks.push(toolBlock);
+        assistant.blocks.push(toolBlock);
       } else if (block.type === 'tool_result') {
         const content = (block as Record<string, unknown>).content;
         const toolUseId = (block as Record<string, unknown>).tool_use_id as string;
@@ -90,19 +98,16 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
           : Array.isArray(content)
             ? (content as Array<{ text?: string }>).map(c => c.text || '').join('')
             : '';
-        // Find the matching tool_use block and update it
-        if (currentAssistant) {
-          const toolBlock = currentAssistant.blocks.find(
-            (b): b is ToolUseBlock => b.type === 'tool_use' && b.toolUseId === toolUseId
-          );
-          if (toolBlock) {
-            toolBlock.status = isError ? 'error' : 'success';
-            toolBlock.output = output;
-          }
+        const toolBlock = assistant.blocks.find(
+          (b): b is ToolUseBlock => b.type === 'tool_use' && b.toolUseId === toolUseId
+        );
+        if (toolBlock) {
+          toolBlock.status = isError ? 'error' : 'success';
+          toolBlock.output = output;
         }
       }
     }
-    triggerReactivity();
+    replaceMessages();
   }
 
   function handleStreamEvent(event: Record<string, unknown>) {
@@ -116,6 +121,8 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
         const block = streamEvent.content_block;
         if (block?.type === 'tool_use') {
           ensureAssistantMessage();
+          const assistant = getCurrentAssistant();
+          if (!assistant) break;
           toolInputJson = '';
           const toolBlock: ToolUseBlock = {
             type: 'tool_use',
@@ -124,8 +131,8 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
             input: {},
             status: 'running',
           };
-          currentAssistant!.blocks.push(toolBlock);
-          triggerReactivity();
+          assistant.blocks.push(toolBlock);
+          replaceMessages();
         } else if (block?.type === 'text') {
           ensureAssistantMessage();
           streamingText = '';
@@ -146,31 +153,28 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
         }
         break;
       }
-      case 'content_block_stop':
-        if (toolInputJson && currentAssistant) {
-          const lastTool = [...currentAssistant.blocks].reverse().find(
+      case 'content_block_stop': {
+        const assistant = getCurrentAssistant();
+        if (toolInputJson && assistant) {
+          const lastTool = [...assistant.blocks].reverse().find(
             (b): b is ToolUseBlock => b.type === 'tool_use'
           );
           if (lastTool) {
             try {
               lastTool.input = JSON.parse(toolInputJson);
             } catch {
-              // malformed JSON, keep empty input
+              // malformed JSON
             }
-            triggerReactivity();
+            replaceMessages();
           }
           toolInputJson = '';
         }
         streamingText = '';
         break;
+      }
       case 'message_stop':
         break;
     }
-  }
-
-  function handleToolProgress(_event: Record<string, unknown>) {
-    // tool_progress just confirms a tool is still running — no action needed
-    // since we already set status to 'running' on tool_use start
   }
 
   function handleError(errorMessage: string) {
@@ -180,95 +184,127 @@ export function useChat(ws: UseWebSocketReturn): UseChatReturn {
   }
 
   function ensureAssistantMessage() {
-    if (!currentAssistant) {
-      currentAssistant = {
-        id: genId(),
+    if (!currentAssistantId) {
+      const id = genId();
+      currentAssistantId = id;
+      messages.value = [...messages.value, {
+        id,
         role: 'assistant',
         blocks: [],
         timestamp: Date.now(),
-      };
-      messages.value.push(currentAssistant);
+      }];
     }
   }
 
   function pushTextBlock(text: string) {
-    if (!currentAssistant) return;
-    const lastBlock = currentAssistant.blocks[currentAssistant.blocks.length - 1];
+    const assistant = getCurrentAssistant();
+    if (!assistant) return;
+    const lastBlock = assistant.blocks[assistant.blocks.length - 1];
     if (lastBlock && lastBlock.type === 'text') {
       lastBlock.text = text;
     } else {
-      currentAssistant.blocks.push({ type: 'text', text });
+      assistant.blocks.push({ type: 'text', text });
     }
-    triggerReactivity();
+    replaceMessages();
   }
 
   function updateOrPushStreamingText() {
-    if (!currentAssistant) return;
-    const lastBlock = currentAssistant.blocks[currentAssistant.blocks.length - 1];
+    const assistant = getCurrentAssistant();
+    if (!assistant) return;
+    const lastBlock = assistant.blocks[assistant.blocks.length - 1];
     if (lastBlock && lastBlock.type === 'text') {
       lastBlock.text = streamingText;
     } else {
-      currentAssistant.blocks.push({ type: 'text', text: streamingText });
+      assistant.blocks.push({ type: 'text', text: streamingText });
     }
-    triggerReactivity();
+    replaceMessages();
+  }
+
+  function replaceMessages() {
+    messages.value = messages.value.map(msg =>
+      msg.id === currentAssistantId
+        ? { ...msg, blocks: [...msg.blocks] }
+        : msg
+    );
   }
 
   function finalizeStreaming() {
     isStreaming.value = false;
-    // Mark any still-running tool blocks as success (server didn't report error)
-    if (currentAssistant) {
-      for (const block of currentAssistant.blocks) {
+    const assistant = getCurrentAssistant();
+    if (assistant) {
+      for (const block of assistant.blocks) {
         if (block.type === 'tool_use' && block.status === 'running') {
           block.status = 'success';
         }
       }
+      replaceMessages();
     }
-    currentAssistant = null;
+    currentAssistantId = null;
     streamingText = '';
-    triggerReactivity();
   }
 
-  function triggerReactivity() {
-    messages.value = [...messages.value];
-  }
-
-  function sendMessage(sessionId: string, content: string) {
+  function sendMessage(sessionName: string, content: string) {
     const userMsg: DisplayMessage = {
       id: genId(),
       role: 'user',
       blocks: [{ type: 'text', text: content }],
       timestamp: Date.now(),
     };
-    messages.value.push(userMsg);
+    messages.value = [...messages.value, userMsg];
     isStreaming.value = true;
-    ws.send({ type: 'message', sessionId, content });
+    ws.send({ type: 'message', sessionName, content });
   }
 
-  function createSession(sessionName: string, content?: string) {
-    if (content) {
-      const userMsg: DisplayMessage = {
-        id: genId(),
-        role: 'user',
-        blocks: [{ type: 'text', text: content }],
-        timestamp: Date.now(),
-      };
-      messages.value.push(userMsg);
-      isStreaming.value = true;
+  function createSession(sessionName: string) {
+    ws.send({ type: 'new_session', sessionName });
+  }
+
+  function loadFromHistory(historyMessages: HistoryMessage[]) {
+    const displayMsgs: DisplayMessage[] = [];
+    for (const hm of historyMessages) {
+      const content = hm.message?.content;
+      if (!Array.isArray(content)) continue;
+      const blocks: ContentBlock[] = [];
+      for (const block of content) {
+        if (block.type === 'text' && block.text) {
+          blocks.push({ type: 'text', text: block.text });
+        } else if (block.type === 'tool_use' && block.name) {
+          blocks.push({
+            type: 'tool_use',
+            toolUseId: block.id || '',
+            name: block.name,
+            input: block.input || {},
+            status: 'success',
+          });
+        }
+      }
+      if (blocks.length > 0) {
+        displayMsgs.push({
+          id: genId(),
+          role: hm.type as 'user' | 'assistant',
+          blocks,
+          timestamp: Date.now(),
+        });
+      }
     }
-    ws.send({ type: 'new_session', sessionName, content });
-  }
-
-  function abort(sessionId: string) {
-    ws.send({ type: 'abort', sessionId });
-  }
-
-  function clearMessages() {
-    messages.value = [];
-    currentAssistant = null;
+    messages.value = displayMsgs;
+    currentAssistantId = null;
     streamingText = '';
     toolInputJson = '';
     isStreaming.value = false;
   }
 
-  return { messages, isStreaming, sendMessage, createSession, abort, clearMessages };
+  function abort(sessionName: string) {
+    ws.send({ type: 'abort', sessionName });
+  }
+
+  function clearMessages() {
+    messages.value = [];
+    currentAssistantId = null;
+    streamingText = '';
+    toolInputJson = '';
+    isStreaming.value = false;
+  }
+
+  return { messages, isStreaming, sendMessage, createSession, loadFromHistory, abort, clearMessages };
 }

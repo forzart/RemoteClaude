@@ -6,7 +6,10 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { registerWsRoute } from './routes/ws.js';
 import { registerSessionRoutes } from './routes/sessions.js';
+import { registerConfigRoutes } from './routes/config.js';
 import { SessionManager } from './services/session-manager.js';
+import { ConfigCache } from './services/config-cache.js';
+import { probeConfig } from './services/agent-query.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -15,12 +18,14 @@ const HOST = process.env.HOST || '0.0.0.0';
 async function main(): Promise<void> {
   const app = Fastify({ logger: true });
   const sessionManager = new SessionManager();
+  const configCache = new ConfigCache();
 
   await app.register(cors, { origin: true });
   await app.register(websocket);
 
-  registerWsRoute(app, sessionManager);
+  registerWsRoute(app, sessionManager, configCache);
   registerSessionRoutes(app);
+  registerConfigRoutes(app, configCache);
 
   app.get('/health', async () => ({ status: 'ok' }));
 
@@ -29,11 +34,13 @@ async function main(): Promise<void> {
   await app.register(fastifyStatic, {
     root: webDistPath,
     prefix: '/',
-    wildcard: false,
   });
 
-  // SPA fallback: serve index.html for unmatched routes
-  app.setNotFoundHandler(async (_request, reply) => {
+  // SPA fallback: serve index.html for non-file routes
+  app.setNotFoundHandler(async (request, reply) => {
+    if (request.url.startsWith('/api/') || request.url.startsWith('/ws/')) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
     return reply.sendFile('index.html', webDistPath);
   });
 
@@ -49,6 +56,10 @@ async function main(): Promise<void> {
 
   await app.listen({ port: PORT, host: HOST });
   app.log.info(`RemoteClaude server listening on ${HOST}:${PORT}`);
+
+  void probeConfig(configCache).then(() => {
+    app.log.info('Config cache populated from probe query');
+  });
 }
 
 main().catch((err) => {

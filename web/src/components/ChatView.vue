@@ -13,11 +13,17 @@
         <span class="dot-pulse"></span>
       </div>
     </div>
+    <ConfigPanel
+      :open="configOpen"
+      :initial-tab="configTab"
+      @close="configOpen = false"
+    />
     <InputBar
       :disabled="!hasSession"
       :is-streaming="isStreaming"
       @send="onSend"
       @abort="onAbort"
+      @config="onConfig"
     />
   </div>
 </template>
@@ -27,6 +33,7 @@ import { ref, watch, nextTick } from 'vue';
 import type { DisplayMessage } from '../types/messages.js';
 import MessageBubble from './MessageBubble.vue';
 import InputBar from './InputBar.vue';
+import ConfigPanel from './ConfigPanel.vue';
 
 const props = defineProps<{
   messages: DisplayMessage[];
@@ -40,6 +47,16 @@ const emit = defineEmits<{
 }>();
 
 const messagesRef = ref<HTMLElement | null>(null);
+const configOpen = ref(false);
+const configTab = ref('mcp');
+
+const interceptedCommands: Record<string, string> = {
+  '/mcp': 'mcp',
+  '/skills': 'skills',
+  '/config': 'config',
+  '/model': 'config',
+  '/models': 'config',
+};
 
 watch(
   () => props.messages.length,
@@ -67,16 +84,30 @@ function scrollToBottom() {
 }
 
 function onSend(content: string) {
+  const cmd = content.trim().split(/\s/)[0].toLowerCase();
+  const tab = interceptedCommands[cmd];
+  if (tab) {
+    configTab.value = tab;
+    configOpen.value = true;
+    return;
+  }
   emit('send', content);
 }
 
 function onAbort() {
   emit('abort');
 }
+
+function onConfig(tab: string) {
+  configTab.value = tab;
+  configOpen.value = !configOpen.value || configTab.value !== tab;
+}
 </script>
 
 <style scoped>
 .chat-view {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;

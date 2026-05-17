@@ -1,30 +1,37 @@
 <template>
-  <div class="input-bar">
-    <textarea
-      ref="inputRef"
-      v-model="text"
-      class="input-field"
-      placeholder="Type message..."
-      :disabled="disabled"
-      rows="1"
-      @keydown="handleKeydown"
-      @input="autoResize"
-    />
-    <button
-      v-if="isStreaming"
-      class="btn-abort"
-      @click="$emit('abort')"
-    >
-      ■ Stop
-    </button>
-    <button
-      v-else
-      class="btn-send"
-      :disabled="disabled || !text.trim()"
-      @click="send"
-    >
-      Send ▶
-    </button>
+  <div class="input-wrapper">
+    <div class="input-bar">
+      <textarea
+        ref="inputRef"
+        v-model="text"
+        class="input-field"
+        placeholder="Type message..."
+        :disabled="disabled"
+        rows="1"
+        @keydown="handleKeydown"
+        @input="autoResize"
+      />
+      <button
+        v-if="isStreaming"
+        class="btn-abort"
+        @click="$emit('abort')"
+      >
+        ■ Stop
+      </button>
+      <button
+        v-else
+        class="btn-send"
+        :disabled="disabled || !text.trim()"
+        @click="send"
+      >
+        Send ▶
+      </button>
+    </div>
+    <div class="input-actions">
+      <button class="btn-action" @click="$emit('config', 'mcp')">MCP</button>
+      <button class="btn-action" @click="$emit('config', 'skills')">Skills</button>
+      <button class="btn-action" @click="$emit('config', 'config')">Config</button>
+    </div>
   </div>
 </template>
 
@@ -39,6 +46,7 @@ defineProps<{
 const emit = defineEmits<{
   send: [content: string];
   abort: [];
+  config: [tab: string];
 }>();
 
 const text = ref('');
@@ -69,13 +77,37 @@ function autoResize() {
 </script>
 
 <style scoped>
+.input-wrapper {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+
 .input-bar {
   display: flex;
   gap: 8px;
   align-items: flex-end;
-  padding: 12px 16px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border);
+  padding: 12px 16px 4px;
+}
+
+.input-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 16px 8px;
+}
+
+.btn-action {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.btn-action:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .input-field {

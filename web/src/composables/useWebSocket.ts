@@ -46,13 +46,14 @@ export function useWebSocket(url: Ref<string> | string): UseWebSocketReturn {
     };
 
     ws.onmessage = (event) => {
+      let msg: ServerMessage;
       try {
-        const msg = JSON.parse(event.data) as ServerMessage;
-        for (const handler of handlers) {
-          handler(msg);
-        }
+        msg = JSON.parse(event.data) as ServerMessage;
       } catch {
-        // ignore malformed messages
+        return;
+      }
+      for (const handler of handlers) {
+        handler(msg);
       }
     };
 
