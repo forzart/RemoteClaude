@@ -1,0 +1,13 @@
+{
+  "name": "remoteclaude",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "install:all": "npm install",
+    "build": "npm run build -w server && npm run build -w web",
+    "start": "npm start -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web"
+  }
+}

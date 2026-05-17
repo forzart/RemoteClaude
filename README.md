@@ -33,13 +33,12 @@ The server spawns Claude Code as a subprocess via the Agent SDK. User messages a
 git clone https://github.com/forzart/RemoteClaude.git
 cd RemoteClaude
 
-# Install dependencies
-cd server && npm install && cd ..
-cd web && npm install && cd ..
+# Install all dependencies (npm workspaces)
+npm install
 
-# Build everything and start
-cd web && npm run build && cd ..
-cd server && npm run build && npm start
+# Build and start
+npm run build
+npm start
 ```
 
 Open http://localhost:3000 — the server serves both the API and the web client.
@@ -50,10 +49,10 @@ For frontend development with hot reload:
 
 ```bash
 # Terminal 1 — start the server
-cd server && npm run dev
+npm run dev:server
 
 # Terminal 2 — start Vite dev server (proxies API/WebSocket to :3000)
-cd web && npm run dev
+npm run dev:web
 ```
 
 Open http://localhost:5173. Changes to Vue files will hot-reload instantly.
