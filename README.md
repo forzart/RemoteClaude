@@ -24,7 +24,13 @@ The server spawns Claude Code as a subprocess via the Agent SDK. User messages a
 ## Prerequisites
 
 - **Node.js** >= 18
-- **Claude Code CLI** installed and authenticated (`npm install -g @anthropic-ai/claude-code`)
+- **Claude Code CLI** installed and authenticated:
+  ```bash
+  npm install -g @anthropic-ai/claude-code
+  claude login
+  ```
+
+> **Note:** The Agent SDK (`@anthropic-ai/claude-agent-sdk`) does not include the CLI itself — it spawns the CLI as a subprocess. Without the CLI installed globally, the server cannot run queries.
 
 ## Quick Start
 
