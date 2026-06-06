@@ -11,7 +11,7 @@ import { SessionManager } from './services/session-manager.js';
 import { ConfigCache } from './services/config-cache.js';
 import { probeConfig } from './services/agent-query.js';
 import { loadConfig } from './services/config-file.js';
-import { TelegramBot } from './services/telegram-bot.js';
+import { TelegramBot } from './channels/telegram/bot.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);

@@ -3,10 +3,10 @@ import { randomUUID } from 'crypto';
 import { rmSync } from 'fs';
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import type { FastifyBaseLogger } from 'fastify';
-import type { SessionManager } from './session-manager.js';
-import { resumeSession, sessionCwd, startNewSession } from './agent-query.js';
-import { formatSdkEvent, splitForTelegram } from './sdk-event-formatter.js';
-import type { TelegramConfig } from './config-file.js';
+import type { SessionManager } from '../../services/session-manager.js';
+import { resumeSession, sessionCwd, startNewSession } from '../../services/agent-query.js';
+import { formatSdkEvent, splitForTelegram } from '../formatter.js';
+import type { TelegramConfig } from './schema.js';
 
 const SEND_INTERVAL_MS = 1100;
 
