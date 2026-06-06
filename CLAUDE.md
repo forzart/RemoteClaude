@@ -10,8 +10,65 @@ RemoteClaude — a web-based interface for Claude Code, powered by the Claude Ag
 
 - **Server:** TypeScript, Fastify, `@anthropic-ai/claude-agent-sdk`, WebSocket
 - **Web:** Vue 3 (Composition API), Vite, TypeScript, markdown-it, Shiki
+- **Channels:** Telegram (grammy), extensible to Discord/Feishu/etc.
 - **Monorepo:** npm workspaces (`server/`, `web/`)
 - **Node:** >= 18
+
+## Project Structure
+
+```
+RemoteClaude/
+├── server/                              # Fastify backend
+│   ├── src/
+│   │   ├── index.ts                     # Entry point, registers routes + channels
+│   │   ├── routes/
+│   │   │   ├── ws.ts                    # WebSocket /ws/chat
+│   │   │   ├── sessions.ts              # REST: list/history/delete sessions
+│   │   │   └── config.ts                # REST: /api/config/mcp|skills|overview
+│   │   ├── services/
+│   │   │   ├── agent-query.ts           # Claude Agent SDK integration
+│   │   │   ├── session-manager.ts       # Active session + AbortController tracking
+│   │   │   ├── config-cache.ts          # Cached config from SDK probe
+│   │   │   └── config-file.ts           # Loads server/config.json (zod-validated)
+│   │   ├── channels/                    # Non-web clients (mobile/IM)
+│   │   │   ├── formatter.ts             # Shared: SDK event → plain text chunks
+│   │   │   └── telegram/
+│   │   │       ├── bot.ts               # grammy bot, commands, rate-limited queue
+│   │   │       └── schema.ts            # Telegram-specific zod config schema
+│   │   └── types/
+│   │       └── events.ts                # WebSocket protocol types
+│   ├── config.example.json              # Config template (commit)
+│   └── config.json                      # Actual config (gitignored)
+│
+├── web/                                 # Vue 3 + Vite frontend
+│   └── src/
+│       ├── App.vue                      # Root layout, WebSocket lifecycle
+│       ├── components/
+│       │   ├── ChatView.vue             # Messages + slash command interception
+│       │   ├── InputBar.vue             # Text input + config buttons
+│       │   ├── SessionSidebar.vue       # Session list
+│       │   ├── MessageBubble.vue        # Message rendering
+│       │   ├── CodeBlock.vue            # Syntax-highlighted code (Shiki)
+│       │   ├── ToolCallCard.vue         # Tool input/output card
+│       │   └── ConfigPanel.vue          # MCP / Skills / Config tabs
+│       ├── composables/
+│       │   ├── useWebSocket.ts          # Auto-reconnect WebSocket
+│       │   ├── useChat.ts               # Message state + streaming
+│       │   └── useSessions.ts           # Session CRUD via REST
+│       └── types/
+│           └── messages.ts              # Protocol + display types
+│
+└── docs/superpowers/
+    ├── plans/                           # Implementation plans
+    └── specs/                           # Design documents
+```
+
+### Adding a new channel (Discord, Feishu, Slack, etc.)
+
+1. Create `server/src/channels/<name>/{bot.ts,schema.ts}`
+2. Import the new schema into `services/config-file.ts` and add to `configSchema`
+3. Read `config.<name>` in `index.ts` and instantiate the bot if present
+4. Reuse `channels/formatter.ts` for SDK event formatting (channel-specific message splitting may go alongside)
 
 ## Development Rules
 
@@ -54,22 +111,12 @@ Browser (Vue 3)  ──WebSocket──▶  Fastify Server  ──SDK──▶  C
 - Conversation history read from Claude journal files at `~/.claude/projects/<projectKey>/<sessionId>.jsonl`
 - Config (MCP servers, skills, models) cached at startup via probe query
 
-## Key Modules
+## Key Behaviors to Know
 
-**Server:**
-- `server/src/routes/ws.ts` — WebSocket `/ws/chat`, message protocol
-- `server/src/routes/sessions.ts` — REST: list/history/delete; reads JSONL with **parentUuid chain traversal**, crosses compact boundary via `logicalParentUuid`
-- `server/src/routes/config.ts` — REST: `/api/config/mcp|skills|overview`
-- `server/src/services/agent-query.ts` — SDK `query()` integration, session lifecycle
-- `server/src/services/session-manager.ts` — Active session + AbortController tracking
-- `server/src/services/config-cache.ts` — Cached config from SDK init probe
-
-**Web:**
-- `web/src/composables/useWebSocket.ts` — auto-reconnect WebSocket
-- `web/src/composables/useChat.ts` — message state + streaming, merges `tool_result` back into matching `tool_use` blocks
-- `web/src/composables/useSessions.ts` — session CRUD via REST
-- `web/src/components/ChatView.vue` — intercepts `/mcp`, `/skills`, `/config` slash commands (Agent SDK doesn't support interactive slash commands in headless mode)
-- `web/src/components/ToolCallCard.vue` — collapsible tool input/output card
+- **Session history (`routes/sessions.ts`)** — reads JSONL via **parentUuid chain traversal**, crosses compact boundary via `logicalParentUuid`. Don't switch back to sequential scanning; it would break sidechain filtering and compact-crossing.
+- **Tool result rendering** — both web and Telegram show tool invocation only (e.g. `⚒ Read: file.ts`), never the tool result body. This is intentional; results are noisy on review and the assistant's next text already summarizes them.
+- **Slash command interception** — `web/src/components/ChatView.vue` intercepts `/mcp`, `/skills`, `/config` client-side. The Agent SDK doesn't support interactive slash commands in headless mode, so we serve the data from `/api/config/*` instead.
+- **`useChat.ts`** merges `tool_result` blocks back into the matching `tool_use` block by `toolUseId` so they render as one collapsible card.
 
 ## Important Constraints
 
