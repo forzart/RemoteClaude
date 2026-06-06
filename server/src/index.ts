@@ -10,6 +10,8 @@ import { registerConfigRoutes } from './routes/config.js';
 import { SessionManager } from './services/session-manager.js';
 import { ConfigCache } from './services/config-cache.js';
 import { probeConfig } from './services/agent-query.js';
+import { loadConfig } from './services/config-file.js';
+import { TelegramBot } from './services/telegram-bot.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -44,9 +46,12 @@ async function main(): Promise<void> {
     return reply.sendFile('index.html', webDistPath);
   });
 
+  let telegramBot: TelegramBot | undefined;
+
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}, shutting down...`);
     sessionManager.abortAll();
+    if (telegramBot) await telegramBot.stop();
     await app.close();
     process.exit(0);
   };
@@ -60,6 +65,14 @@ async function main(): Promise<void> {
   void probeConfig(configCache).then(() => {
     app.log.info('Config cache populated from probe query');
   });
+
+  const config = loadConfig();
+  if (config.telegram) {
+    telegramBot = new TelegramBot(config.telegram, sessionManager, app.log);
+    await telegramBot.start();
+  } else {
+    app.log.info('No telegram config found, skipping Telegram bot');
+  }
 }
 
 main().catch((err) => {

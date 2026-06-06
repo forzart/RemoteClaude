@@ -107,6 +107,28 @@ RemoteClaude/
 
 Sessions are stored in `~/.remoteclaude/cwd/{sessionName}/`. Claude journal files (JSONL) are read from `~/.claude/projects/`.
 
+### Telegram Bot (Optional)
+
+Use Claude from your phone via Telegram instead of opening a browser. The server will start a Telegram bot alongside the web interface if `server/config.json` exists.
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token
+2. Get your Telegram numeric user ID from [@userinfobot](https://t.me/userinfobot)
+3. Copy `server/config.example.json` to `server/config.json` and fill in:
+
+```json
+{
+  "telegram": {
+    "botToken": "1234567890:AAAA...",
+    "allowedUserId": 12345678,
+    "sessionName": "telegram"
+  }
+}
+```
+
+4. Restart the server. Send any message to the bot to talk to Claude.
+
+Commands: `/help`, `/status`, `/abort`, `/reset`
+
 ## API
 
 ### WebSocket — `/ws/chat`
