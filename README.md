@@ -109,7 +109,7 @@ Sessions are stored in `~/.remoteclaude/cwd/{sessionName}/`. Claude journal file
 
 ### Telegram Bot (Optional)
 
-Use Claude from your phone via Telegram instead of opening a browser. The server will start a Telegram bot alongside the web interface if `server/config.json` exists.
+Use Claude from your phone via Telegram instead of opening a browser. The server starts a Telegram bot alongside the web interface if `server/config.json` exists.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token
 2. Get your Telegram numeric user ID from [@userinfobot](https://t.me/userinfobot)
@@ -120,14 +120,31 @@ Use Claude from your phone via Telegram instead of opening a browser. The server
   "telegram": {
     "botToken": "1234567890:AAAA...",
     "allowedUserId": 12345678,
-    "sessionName": "telegram"
+    "cwd": "~"
   }
 }
 ```
 
+| Field | Required | Description |
+|---|---|---|
+| `botToken` | yes | Token from @BotFather |
+| `allowedUserId` | yes | Your numeric Telegram user ID (whitelist, single user) |
+| `cwd` | yes | Default working directory for Claude (supports `~`, must be absolute and exist) |
+
 4. Restart the server. Send any message to the bot to talk to Claude.
 
-Commands: `/help`, `/status`, `/abort`, `/reset`
+**Commands:**
+
+| Command | Behavior |
+|---|---|
+| `/help` | List available commands |
+| `/pwd` | Show current working directory |
+| `/cd <path>` | Switch working directory (`~/projects/foo` or absolute paths) |
+| `/status` | Show cwd, running state, last activity |
+| `/abort` | Cancel the running query |
+| `/reset` | Clear conversation history (next message starts fresh) |
+
+Tool calls are streamed as separate messages (`⚒ Read: file.ts`), with a typing indicator while Claude is working.
 
 ## API
 
