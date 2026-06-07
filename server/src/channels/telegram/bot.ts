@@ -1,16 +1,20 @@
 import { Bot, type Context } from 'grammy';
 import { randomUUID } from 'crypto';
-import { rmSync } from 'fs';
+import { existsSync, statSync } from 'fs';
+import { resolve, isAbsolute } from 'path';
+import { homedir } from 'os';
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import type { SessionManager } from '../../services/session-manager.js';
-import { resumeSession, sessionCwd, startNewSession } from '../../services/agent-query.js';
+import { resumeSession, startNewSession } from '../../services/agent-query.js';
 import { formatSdkEvent, splitForTelegram } from '../formatter.js';
 import type { TelegramConfig } from './schema.js';
 
 const SEND_INTERVAL_MS = 1100;
+const SESSION_KEY = '_telegram';
 
 interface BotState {
+  cwd: string;
   lastActivityAt: number;
 }
 
@@ -19,7 +23,7 @@ export class TelegramBot {
   private readonly config: TelegramConfig;
   private readonly sessionManager: SessionManager;
   private readonly logger: FastifyBaseLogger;
-  private readonly state: BotState = { lastActivityAt: 0 };
+  private readonly state: BotState;
   private outboundQueue: Promise<unknown> = Promise.resolve();
   private lastSentAt = 0;
 
@@ -31,6 +35,10 @@ export class TelegramBot {
     this.config = config;
     this.sessionManager = sessionManager;
     this.logger = logger;
+    this.state = {
+      cwd: resolveCwd(config.cwd),
+      lastActivityAt: 0,
+    };
     this.bot = new Bot(config.botToken);
     this.registerHandlers();
   }
@@ -41,7 +49,9 @@ export class TelegramBot {
     });
     void this.bot.start({
       onStart: (me) => {
-        this.logger.info(`Telegram bot started as @${me.username}, polling for updates`);
+        this.logger.info(
+          `Telegram bot started as @${me.username}, polling for updates (cwd=${this.state.cwd})`,
+        );
       },
     });
   }
@@ -65,6 +75,8 @@ export class TelegramBot {
     this.bot.command('start', (ctx) => this.handleStart(ctx));
     this.bot.command('help', (ctx) => this.handleHelp(ctx));
     this.bot.command('status', (ctx) => this.handleStatus(ctx));
+    this.bot.command('pwd', (ctx) => this.handlePwd(ctx));
+    this.bot.command('cd', (ctx) => this.handleCd(ctx));
     this.bot.command('abort', (ctx) => this.handleAbort(ctx));
     this.bot.command('reset', (ctx) => this.handleReset(ctx));
     this.bot.on('message:text', (ctx) => this.handlePrompt(ctx));
@@ -74,6 +86,8 @@ export class TelegramBot {
     await this.reply(ctx, [
       '👋 RemoteClaude bot ready.',
       '',
+      `Working directory: ${this.state.cwd}`,
+      '',
       'Send any message to talk to Claude.',
       'Use /help to see available commands.',
     ].join('\n'));
@@ -82,9 +96,11 @@ export class TelegramBot {
   private async handleHelp(ctx: Context): Promise<void> {
     await this.reply(ctx, [
       'Commands:',
-      '/status — show current session status',
+      '/pwd — show current working directory',
+      '/cd <path> — switch working directory',
+      '/status — show running status',
       '/abort — cancel the running query',
-      '/reset — clear session history',
+      '/reset — clear conversation history',
       '/help — show this message',
       '',
       'Any other text is sent to Claude as a prompt.',
@@ -92,60 +108,75 @@ export class TelegramBot {
   }
 
   private async handleStatus(ctx: Context): Promise<void> {
-    const sessionName = this.config.sessionName;
-    const isRunning = this.sessionManager.isActive(sessionName);
+    const isRunning = this.sessionManager.isActive(SESSION_KEY);
     const last = this.state.lastActivityAt
       ? new Date(this.state.lastActivityAt).toISOString()
       : 'never';
     await this.reply(ctx, [
-      `Session: ${sessionName}`,
+      `Cwd: ${this.state.cwd}`,
       `Running: ${isRunning ? 'yes' : 'no'}`,
       `Last activity: ${last}`,
     ].join('\n'));
   }
 
+  private async handlePwd(ctx: Context): Promise<void> {
+    await this.reply(ctx, this.state.cwd);
+  }
+
+  private async handleCd(ctx: Context): Promise<void> {
+    const arg = ctx.message?.text?.split(/\s+/, 2)[1]?.trim();
+    if (!arg) {
+      await this.reply(ctx, 'Usage: /cd <path>');
+      return;
+    }
+    if (this.sessionManager.isActive(SESSION_KEY)) {
+      await this.reply(ctx, 'Cannot change cwd while a query is running. Use /abort first.');
+      return;
+    }
+    let target: string;
+    try {
+      target = resolveCwd(arg);
+    } catch (err: unknown) {
+      await this.reply(ctx, `❌ ${getErrorMessage(err)}`);
+      return;
+    }
+    this.state.cwd = target;
+    await this.reply(ctx, `Switched to ${target}`);
+  }
+
   private async handleAbort(ctx: Context): Promise<void> {
-    const sessionName = this.config.sessionName;
-    if (!this.sessionManager.isActive(sessionName)) {
+    if (!this.sessionManager.isActive(SESSION_KEY)) {
       await this.reply(ctx, 'Nothing to abort.');
       return;
     }
-    this.sessionManager.abort(sessionName);
+    this.sessionManager.abort(SESSION_KEY);
     await this.reply(ctx, '🛑 Aborted.');
   }
 
   private async handleReset(ctx: Context): Promise<void> {
-    const sessionName = this.config.sessionName;
-    if (this.sessionManager.isActive(sessionName)) {
+    if (this.sessionManager.isActive(SESSION_KEY)) {
       await this.reply(ctx, 'Cannot reset while a query is running. Use /abort first.');
       return;
     }
-    const dir = sessionCwd(sessionName);
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      await this.reply(ctx, '✅ Session reset.');
-    } catch (err: unknown) {
-      this.logger.error({ err }, 'Failed to reset Telegram session');
-      await this.reply(ctx, `❌ Reset failed: ${getErrorMessage(err)}`);
-    }
+    this.sessionManager.unregister(SESSION_KEY);
+    await this.reply(ctx, '✅ Session reset. Next message starts fresh.');
   }
 
   private async handlePrompt(ctx: Context): Promise<void> {
     const prompt = ctx.message?.text;
     if (!prompt || prompt.startsWith('/')) return;
 
-    const sessionName = this.config.sessionName;
-    if (this.sessionManager.isActive(sessionName)) {
+    if (this.sessionManager.isActive(SESSION_KEY)) {
       await this.reply(ctx, 'Claude is busy. /abort to cancel, or wait for completion.');
       return;
     }
 
     this.state.lastActivityAt = Date.now();
+    const cwd = this.state.cwd;
 
     let sessionId: string;
     let isResume = false;
     try {
-      const cwd = sessionCwd(sessionName);
       const existing = await listSessions({ dir: cwd });
       if (existing.length > 0) {
         sessionId = existing.sort((a, b) => b.lastModified - a.lastModified)[0].sessionId;
@@ -158,12 +189,13 @@ export class TelegramBot {
     }
 
     const abortController = new AbortController();
-    this.sessionManager.register(sessionName, sessionId, abortController);
+    this.sessionManager.register(SESSION_KEY, sessionId, abortController);
 
     const handle = isResume
-      ? resumeSession({ prompt, sessionId, sessionName, abortController })
-      : startNewSession({ prompt, sessionId, sessionName, abortController });
+      ? resumeSession({ prompt, sessionId, cwd, abortController })
+      : startNewSession({ prompt, sessionId, cwd, abortController });
 
+    const stopTyping = this.startTyping(ctx);
     let producedText = false;
     try {
       for await (const event of handle.generator) {
@@ -184,9 +216,21 @@ export class TelegramBot {
         await this.enqueueSend(ctx, `❌ Error: ${getErrorMessage(err)}`);
       }
     } finally {
-      this.sessionManager.unregister(sessionName);
+      stopTyping();
+      this.sessionManager.unregister(SESSION_KEY);
       this.state.lastActivityAt = Date.now();
     }
+  }
+
+  private startTyping(ctx: Context): () => void {
+    const send = (): void => {
+      void ctx.replyWithChatAction('typing').catch((err: unknown) => {
+        this.logger.debug({ err }, 'sendChatAction failed');
+      });
+    };
+    send();
+    const handle = setInterval(send, 4000);
+    return () => clearInterval(handle);
   }
 
   private async reply(ctx: Context, text: string): Promise<void> {
@@ -211,6 +255,23 @@ export class TelegramBot {
     this.outboundQueue = this.outboundQueue.then(send, send);
     return this.outboundQueue as Promise<void>;
   }
+}
+
+function resolveCwd(input: string): string {
+  let path = input;
+  if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) {
+    path = resolve(homedir(), path.slice(2) || '.');
+  } else if (!isAbsolute(path)) {
+    throw new Error(`Path must be absolute or start with ~/: ${input}`);
+  }
+  const normalized = resolve(path);
+  if (!existsSync(normalized)) {
+    throw new Error(`Directory does not exist: ${normalized}`);
+  }
+  if (!statSync(normalized).isDirectory()) {
+    throw new Error(`Not a directory: ${normalized}`);
+  }
+  return normalized;
 }
 
 function sleep(ms: number): Promise<void> {

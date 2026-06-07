@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { readdirSync, statSync, rmSync, readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
-import { SESSIONS_ROOT, sessionCwd } from '../services/agent-query.js';
+import { SESSIONS_ROOT, sessionCwd } from '../services/session-paths.js';
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import { globSync } from 'glob';
 
@@ -219,13 +219,13 @@ export function registerSessionRoutes(app: FastifyInstance): void {
     '/api/sessions/:name',
     async (request, reply) => {
       const { name } = request.params;
-      const sessionDir = resolve(SESSIONS_ROOT, name);
+      const dir = resolve(SESSIONS_ROOT, name);
       try {
-        statSync(sessionDir);
+        statSync(dir);
       } catch {
         return reply.code(404).send({ error: 'Session not found' });
       }
-      rmSync(sessionDir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
       return reply.code(204).send();
     },
   );

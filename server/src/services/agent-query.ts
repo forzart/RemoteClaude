@@ -1,28 +1,20 @@
 import { query, type SDKMessage, type Query } from '@anthropic-ai/claude-agent-sdk';
-import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import { mkdirSync, rmSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { ConfigCache, updateCacheFromQuery } from './config-cache.js';
-
-const REMOTE_CLAUDE_HOME = resolve(homedir(), '.remoteclaude');
-export const SESSIONS_ROOT = resolve(REMOTE_CLAUDE_HOME, 'cwd');
-
-export function sessionCwd(sessionName: string): string {
-  return resolve(SESSIONS_ROOT, sessionName);
-}
 
 export interface NewSessionParams {
   prompt: string;
   sessionId: string;
-  sessionName: string;
+  cwd: string;
   abortController: AbortController;
 }
 
 export interface ResumeSessionParams {
   prompt: string;
   sessionId: string;
-  sessionName: string;
+  cwd: string;
   abortController: AbortController;
 }
 
@@ -42,12 +34,11 @@ function buildCommonOptions(abortController: AbortController): Record<string, un
 }
 
 export function startNewSession(params: NewSessionParams): QueryHandle {
-  const cwd = sessionCwd(params.sessionName);
-  mkdirSync(cwd, { recursive: true });
+  mkdirSync(params.cwd, { recursive: true });
   const generator = query({
     prompt: params.prompt,
     options: {
-      cwd,
+      cwd: params.cwd,
       sessionId: params.sessionId,
       ...buildCommonOptions(params.abortController),
     },
@@ -59,7 +50,7 @@ export function resumeSession(params: ResumeSessionParams): QueryHandle {
   const generator = query({
     prompt: params.prompt,
     options: {
-      cwd: sessionCwd(params.sessionName),
+      cwd: params.cwd,
       resume: params.sessionId,
       ...buildCommonOptions(params.abortController),
     },

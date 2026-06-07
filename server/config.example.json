@@ -2,6 +2,6 @@
   "telegram": {
     "botToken": "YOUR_BOT_TOKEN_FROM_BOTFATHER",
     "allowedUserId": 0,
-    "sessionName": "telegram"
+    "cwd": "~"
   }
 }

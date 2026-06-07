@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import { randomUUID } from 'crypto';
 import { parseClientMessage, type ServerMessage } from '../types/events.js';
-import { startNewSession, resumeSession, sessionCwd } from '../services/agent-query.js';
+import { startNewSession, resumeSession } from '../services/agent-query.js';
+import { sessionCwd } from '../services/session-paths.js';
 import { SessionManager } from '../services/session-manager.js';
 import { ConfigCache, updateCacheFromQuery } from '../services/config-cache.js';
 import { mkdirSync } from 'fs';
@@ -59,13 +60,13 @@ async function handleNewSession(
   sessionName: string,
   sessionManager: SessionManager,
 ): Promise<void> {
-  const cwd = sessionCwd(sessionName);
-  mkdirSync(cwd, { recursive: true });
+  const dir = sessionCwd(sessionName);
+  mkdirSync(dir, { recursive: true });
 
   let sessionId: string;
   let isResume = false;
   try {
-    const sessions = await listSessions({ dir: cwd });
+    const sessions = await listSessions({ dir });
     if (sessions.length > 0) {
       const latest = sessions.sort((a, b) => b.lastModified - a.lastModified)[0];
       sessionId = latest.sessionId;
@@ -108,9 +109,10 @@ async function handleChatMessage(
   const { sessionId, isResume } = pending;
   sessionManager.register(sessionName, sessionId, abortController);
 
+  const cwd = sessionCwd(sessionName);
   const handle = isResume
-    ? resumeSession({ prompt: content, sessionId, sessionName, abortController })
-    : startNewSession({ prompt: content, sessionId, sessionName, abortController });
+    ? resumeSession({ prompt: content, sessionId, cwd, abortController })
+    : startNewSession({ prompt: content, sessionId, cwd, abortController });
 
   await streamEvents(ws, sessionName, sessionId, handle.generator, sessionManager, configCache);
 }
