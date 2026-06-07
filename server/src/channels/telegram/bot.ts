@@ -3,19 +3,35 @@ import { randomUUID } from 'crypto';
 import { existsSync, statSync } from 'fs';
 import { resolve, isAbsolute } from 'path';
 import { homedir } from 'os';
-import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import type { SessionManager } from '../../services/session-manager.js';
 import { resumeSession, startNewSession } from '../../services/agent-query.js';
+import {
+  getCurrentSessionId,
+  setCurrentSessionId,
+  clearCurrentSessionId,
+} from '../../services/session-state.js';
+import {
+  resolveSession,
+  getLatestSession,
+  listAllSessions,
+  describeSession,
+} from '../../services/session-resolver.js';
 import { formatSdkEvent, splitForTelegram } from '../formatter.js';
 import type { TelegramConfig } from './schema.js';
 
 const SEND_INTERVAL_MS = 1100;
 const SESSION_KEY = '_telegram';
+const CHANNEL = 'telegram';
 
 interface BotState {
   cwd: string;
   lastActivityAt: number;
+}
+
+interface SessionAlias {
+  tag?: string;
+  customTitle?: string;
 }
 
 export class TelegramBot {
@@ -77,6 +93,10 @@ export class TelegramBot {
     this.bot.command('status', (ctx) => this.handleStatus(ctx));
     this.bot.command('pwd', (ctx) => this.handlePwd(ctx));
     this.bot.command('cd', (ctx) => this.handleCd(ctx));
+    this.bot.command('attach', (ctx) => this.handleAttach(ctx));
+    this.bot.command('list', (ctx) => this.handleList(ctx));
+    this.bot.command('new', (ctx) => this.handleNew(ctx));
+    this.bot.command('whoami', (ctx) => this.handleWhoami(ctx));
     this.bot.command('abort', (ctx) => this.handleAbort(ctx));
     this.bot.command('reset', (ctx) => this.handleReset(ctx));
     this.bot.on('message:text', (ctx) => this.handlePrompt(ctx));
@@ -98,9 +118,13 @@ export class TelegramBot {
       'Commands:',
       '/pwd — show current working directory',
       '/cd <path> — switch working directory',
+      '/whoami — show current session ID and alias',
+      '/list — list sessions in current cwd',
+      '/attach [id|alias] — attach to a session (latest if omitted)',
+      '/new — start a new session in current cwd',
       '/status — show running status',
       '/abort — cancel the running query',
-      '/reset — clear conversation history',
+      '/reset — forget current session (next message starts fresh)',
       '/help — show this message',
       '',
       'Any other text is sent to Claude as a prompt.',
@@ -112,8 +136,10 @@ export class TelegramBot {
     const last = this.state.lastActivityAt
       ? new Date(this.state.lastActivityAt).toISOString()
       : 'never';
+    const current = getCurrentSessionId(CHANNEL, this.state.cwd);
     await this.reply(ctx, [
       `Cwd: ${this.state.cwd}`,
+      `Session: ${current ? current.slice(0, 8) : '(none)'}`,
       `Running: ${isRunning ? 'yes' : 'no'}`,
       `Last activity: ${last}`,
     ].join('\n'));
@@ -141,7 +167,87 @@ export class TelegramBot {
       return;
     }
     this.state.cwd = target;
-    await this.reply(ctx, `Switched to ${target}`);
+    const ensured = await this.ensureSessionForCwd(target);
+    const status = ensured.created
+      ? `(new session ${ensured.sessionId.slice(0, 8)})`
+      : `(session ${ensured.sessionId.slice(0, 8)})`;
+    await this.reply(ctx, `Switched to ${target} ${status}`);
+  }
+
+  private async handleAttach(ctx: Context): Promise<void> {
+    if (this.sessionManager.isActive(SESSION_KEY)) {
+      await this.reply(ctx, 'Cannot attach while a query is running. Use /abort first.');
+      return;
+    }
+    const arg = ctx.message?.text?.split(/\s+/, 2)[1]?.trim();
+    const cwd = this.state.cwd;
+
+    if (!arg) {
+      const latest = await getLatestSession(cwd);
+      if (!latest) {
+        await this.reply(ctx, 'No sessions found in this cwd. Send a message or use /new to start.');
+        return;
+      }
+      setCurrentSessionId(CHANNEL, cwd, latest.sessionId);
+      await this.reply(ctx, `Attached to latest: ${describeSession(latest)}`);
+      return;
+    }
+
+    const resolved = await resolveSession(arg, cwd);
+    if (!resolved) {
+      await this.reply(ctx, `❌ No session matches "${arg}" in ${cwd}`);
+      return;
+    }
+    setCurrentSessionId(CHANNEL, cwd, resolved.sessionId);
+    await this.reply(ctx, `Attached via ${resolved.matched}: ${describeSession(resolved.info)}`);
+  }
+
+  private async handleList(ctx: Context): Promise<void> {
+    const cwd = this.state.cwd;
+    const sessions = await listAllSessions(cwd);
+    if (sessions.length === 0) {
+      await this.reply(ctx, `No sessions in ${cwd}`);
+      return;
+    }
+    const current = getCurrentSessionId(CHANNEL, cwd);
+    const lines = [`Sessions in ${cwd}:`];
+    for (const s of sessions.slice(0, 10)) {
+      const marker = s.sessionId === current ? '▸' : ' ';
+      lines.push(`${marker} ${describeSession(s)}`);
+    }
+    if (sessions.length > 10) {
+      lines.push(`... and ${sessions.length - 10} more`);
+    }
+    await this.reply(ctx, lines.join('\n'));
+  }
+
+  private async handleNew(ctx: Context): Promise<void> {
+    if (this.sessionManager.isActive(SESSION_KEY)) {
+      await this.reply(ctx, 'Cannot create new session while a query is running. Use /abort first.');
+      return;
+    }
+    const newId = randomUUID();
+    setCurrentSessionId(CHANNEL, this.state.cwd, newId);
+    await this.reply(ctx, `New session ${newId.slice(0, 8)} ready. Send a message to start.`);
+  }
+
+  private async handleWhoami(ctx: Context): Promise<void> {
+    const cwd = this.state.cwd;
+    const current = getCurrentSessionId(CHANNEL, cwd);
+    if (!current) {
+      await this.reply(ctx, `Cwd: ${cwd}\nSession: (none — next message will create one)`);
+      return;
+    }
+    const alias = await this.lookupAlias(current, cwd);
+    const aliasStr = alias.tag
+      ? ` [${alias.tag}]`
+      : alias.customTitle
+        ? ` "${alias.customTitle}"`
+        : '';
+    await this.reply(ctx, [
+      `Cwd: ${cwd}`,
+      `Session: ${current}${aliasStr}`,
+    ].join('\n'));
   }
 
   private async handleAbort(ctx: Context): Promise<void> {
@@ -158,8 +264,9 @@ export class TelegramBot {
       await this.reply(ctx, 'Cannot reset while a query is running. Use /abort first.');
       return;
     }
+    clearCurrentSessionId(CHANNEL, this.state.cwd);
     this.sessionManager.unregister(SESSION_KEY);
-    await this.reply(ctx, '✅ Session reset. Next message starts fresh.');
+    await this.reply(ctx, '✅ Session forgotten. Next message starts fresh.');
   }
 
   private async handlePrompt(ctx: Context): Promise<void> {
@@ -174,19 +281,9 @@ export class TelegramBot {
     this.state.lastActivityAt = Date.now();
     const cwd = this.state.cwd;
 
-    let sessionId: string;
-    let isResume = false;
-    try {
-      const existing = await listSessions({ dir: cwd });
-      if (existing.length > 0) {
-        sessionId = existing.sort((a, b) => b.lastModified - a.lastModified)[0].sessionId;
-        isResume = true;
-      } else {
-        sessionId = randomUUID();
-      }
-    } catch {
-      sessionId = randomUUID();
-    }
+    const ensured = await this.ensureSessionForCwd(cwd);
+    const sessionId = ensured.sessionId;
+    const isResume = !ensured.created;
 
     const abortController = new AbortController();
     this.sessionManager.register(SESSION_KEY, sessionId, abortController);
@@ -219,6 +316,27 @@ export class TelegramBot {
       stopTyping();
       this.sessionManager.unregister(SESSION_KEY);
       this.state.lastActivityAt = Date.now();
+    }
+  }
+
+  private async ensureSessionForCwd(cwd: string): Promise<{ sessionId: string; created: boolean }> {
+    const existing = getCurrentSessionId(CHANNEL, cwd);
+    if (existing) {
+      return { sessionId: existing, created: false };
+    }
+    const newId = randomUUID();
+    setCurrentSessionId(CHANNEL, cwd, newId);
+    return { sessionId: newId, created: true };
+  }
+
+  private async lookupAlias(sessionId: string, cwd: string): Promise<SessionAlias> {
+    try {
+      const sessions = await listAllSessions(cwd);
+      const info = sessions.find((s) => s.sessionId === sessionId);
+      if (!info) return {};
+      return { tag: info.tag, customTitle: info.customTitle };
+    } catch {
+      return {};
     }
   }
 
