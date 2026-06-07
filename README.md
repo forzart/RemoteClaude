@@ -1,25 +1,43 @@
 # RemoteClaude
 
-A web-based interface for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), powered by the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk). Run agentic coding tasks from any browser with real-time streaming, tool execution display, multi-session management, and full conversation history.
+Run [Claude Code](https://docs.anthropic.com/en/docs/claude-code) from your phone via Telegram. Talk to Claude, watch tool calls stream in real time, switch project directories — all without opening a laptop. A web client is also bundled for desktop use.
+
+Powered by the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk).
 
 ## Architecture
 
 ```
-Browser (Vue 3)  ──WebSocket──▶  Fastify Server  ──SDK──▶  Claude Code CLI
-     :5173                           :3000                   (subprocess)
+                                       ┌──▶ Telegram Bot   (mobile, primary)
+Browser / Telegram ──▶ Fastify Server ─┤
+                          + SDK        └──▶ Web Client     (desktop, secondary)
+                            │
+                            ▼
+                       Claude Code CLI (subprocess)
+                            │
+                            ▼
+                       Anthropic API
 ```
 
-The server spawns Claude Code as a subprocess via the Agent SDK. User messages are forwarded as prompts; SDK events (text, tool calls, progress) are streamed back over WebSocket in real time.
+The server spawns Claude Code as a subprocess via the Agent SDK. SDK events (text, tool calls, progress) are streamed back to whichever channel sent the prompt.
 
 ## Features
 
-- **Multi-session chat** — create, switch, resume, and delete named sessions
-- **Real-time streaming** — text and tool execution events streamed over WebSocket
-- **Tool call display** — collapsible cards showing tool name, input, and output
+### Telegram (primary)
+
+- **Phone-first** — single-user bot, long polling (no public HTTPS or webhook needed)
+- **Project switching** — `/cd <path>` and `/pwd` to navigate between project directories
+- **Tool call streaming** — each tool invocation appears as a separate message (`⚒ Read: file.ts`)
+- **Typing indicator** — "is typing…" stays visible while Claude is working
+- **Whitelist auth** — only your Telegram user ID can talk to the bot
+- **Commands** — `/help`, `/pwd`, `/cd`, `/status`, `/abort`, `/reset`
+
+### Web (secondary)
+
+- **Multi-session chat** — create, switch, resume, delete named sessions in a sidebar
 - **Code highlighting** — syntax highlighting via [Shiki](https://shiki.matsu.io/) + Markdown rendering
-- **Full conversation history** — reads Claude journal files (JSONL) with parentUuid chain traversal, including messages before `/compact`
-- **Config discovery** — view MCP servers, skills, models, and agents via `/mcp`, `/skills`, `/config` commands
-- **Auto-reconnect** — WebSocket reconnects automatically on disconnect
+- **Tool call cards** — collapsible cards with input and output
+- **Full conversation history** — reads Claude journal files (JSONL) including messages before `/compact`
+- **Config discovery** — view MCP servers, skills, models, agents via `/mcp`, `/skills`, `/config` slash commands
 
 ## Prerequisites
 
@@ -30,90 +48,27 @@ The server spawns Claude Code as a subprocess via the Agent SDK. User messages a
   claude login
   ```
 
-> **Note:** The Agent SDK (`@anthropic-ai/claude-agent-sdk`) does not include the CLI itself — it spawns the CLI as a subprocess. Without the CLI installed globally, the server cannot run queries.
+> The Agent SDK does not include the CLI itself — it spawns the CLI as a subprocess.
 
 ## Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/forzart/RemoteClaude.git
 cd RemoteClaude
-
-# Install all dependencies (npm workspaces)
 npm install
-
-# Build and start
 npm run build
 npm start
 ```
 
-Open http://localhost:3000 — the server serves both the API and the web client.
+Web UI: http://localhost:3000
 
-### Development Mode
+## Telegram Setup
 
-For frontend development with hot reload:
+The Telegram bot is the primary client. Without `server/config.json` the server still runs (web only) but the bot won't start.
 
-```bash
-# Terminal 1 — start the server
-npm run dev:server
-
-# Terminal 2 — start Vite dev server (proxies API/WebSocket to :3000)
-npm run dev:web
-```
-
-Open http://localhost:5173. Changes to Vue files will hot-reload instantly.
-
-## Project Structure
-
-```
-RemoteClaude/
-├── server/                         # Fastify backend
-│   └── src/
-│       ├── index.ts                # Entry point, registers routes
-│       ├── routes/
-│       │   ├── ws.ts               # WebSocket /ws/chat endpoint
-│       │   ├── sessions.ts         # REST: list, history, delete sessions
-│       │   └── config.ts           # REST: MCP, skills, overview
-│       └── services/
-│           ├── agent-query.ts      # Claude Agent SDK integration
-│           ├── session-manager.ts  # Active session lifecycle
-│           └── config-cache.ts     # Cached config from SDK probe
-│
-└── web/                            # Vue 3 + Vite frontend
-    └── src/
-        ├── App.vue                 # Root layout + WebSocket lifecycle
-        ├── components/
-        │   ├── ChatView.vue        # Message list + slash command interception
-        │   ├── InputBar.vue        # Text input + config buttons
-        │   ├── SessionSidebar.vue  # Session list
-        │   ├── MessageBubble.vue   # Message rendering
-        │   ├── CodeBlock.vue       # Syntax-highlighted code
-        │   ├── ToolCallCard.vue    # Tool execution display
-        │   └── ConfigPanel.vue     # MCP / Skills / Config panel
-        ├── composables/
-        │   ├── useWebSocket.ts     # WebSocket with auto-reconnect
-        │   ├── useChat.ts          # Message state + streaming
-        │   └── useSessions.ts      # Session CRUD
-        └── types/
-            └── messages.ts         # Protocol and display types
-```
-
-## Configuration
-
-| Environment Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Server bind address |
-
-Sessions are stored in `~/.remoteclaude/cwd/{sessionName}/`. Claude journal files (JSONL) are read from `~/.claude/projects/`.
-
-### Telegram Bot (Optional)
-
-Use Claude from your phone via Telegram instead of opening a browser. The server starts a Telegram bot alongside the web interface if `server/config.json` exists.
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token
-2. Get your Telegram numeric user ID from [@userinfobot](https://t.me/userinfobot)
-3. Copy `server/config.example.json` to `server/config.json` and fill in:
+1. Create a bot with [@BotFather](https://t.me/BotFather), copy the token
+2. Get your numeric user ID from [@userinfobot](https://t.me/userinfobot)
+3. Copy `server/config.example.json` to `server/config.json`:
 
 ```json
 {
@@ -128,41 +83,101 @@ Use Claude from your phone via Telegram instead of opening a browser. The server
 | Field | Required | Description |
 |---|---|---|
 | `botToken` | yes | Token from @BotFather |
-| `allowedUserId` | yes | Your numeric Telegram user ID (whitelist, single user) |
-| `cwd` | yes | Default working directory for Claude (supports `~`, must be absolute and exist) |
+| `allowedUserId` | yes | Your numeric Telegram user ID (single-user whitelist) |
+| `cwd` | yes | Default working directory (`~` is allowed; must be absolute and exist) |
 
-4. Restart the server. Send any message to the bot to talk to Claude.
+4. Restart the server. Send any message to the bot — it talks to Claude in the configured `cwd`.
 
 **Commands:**
 
 | Command | Behavior |
 |---|---|
-| `/help` | List available commands |
 | `/pwd` | Show current working directory |
 | `/cd <path>` | Switch working directory (`~/projects/foo` or absolute paths) |
 | `/status` | Show cwd, running state, last activity |
 | `/abort` | Cancel the running query |
 | `/reset` | Clear conversation history (next message starts fresh) |
+| `/help` | List commands |
 
-Tool calls are streamed as separate messages (`⚒ Read: file.ts`), with a typing indicator while Claude is working.
+## Development
 
-## API
+```bash
+npm run dev:server   # server hot reload on :3000
+npm run dev:web      # Vite dev server on :5173 (proxies API/WS to :3000)
+```
+
+## Project Structure
+
+```
+RemoteClaude/
+├── server/                                  # Fastify backend
+│   ├── src/
+│   │   ├── index.ts                         # Entry point: routes + channels
+│   │   ├── routes/                          # HTTP/WebSocket routes (used by web)
+│   │   │   ├── ws.ts                        # WebSocket /ws/chat
+│   │   │   ├── sessions.ts                  # REST: list/history/delete sessions
+│   │   │   └── config.ts                    # REST: /api/config/mcp|skills|overview
+│   │   ├── channels/                        # Non-web clients (mobile/IM)
+│   │   │   ├── formatter.ts                 # Shared: SDK event → plain text
+│   │   │   └── telegram/
+│   │   │       ├── bot.ts                   # grammy bot, commands, rate-limited queue
+│   │   │       └── schema.ts                # Telegram zod config schema
+│   │   └── services/
+│   │       ├── agent-query.ts               # SDK query() integration
+│   │       ├── session-manager.ts           # Active session + AbortController tracking
+│   │       ├── session-paths.ts             # ~/.remoteclaude/cwd path helpers
+│   │       ├── config-cache.ts              # Cached SDK probe results
+│   │       └── config-file.ts               # Loads server/config.json (zod-validated)
+│   ├── config.example.json                  # Config template (committed)
+│   └── config.json                          # Actual config (gitignored)
+│
+├── web/                                     # Vue 3 + Vite frontend
+│   └── src/
+│       ├── App.vue                          # Root layout, WebSocket lifecycle
+│       ├── components/
+│       │   ├── ChatView.vue                 # Messages + slash command interception
+│       │   ├── InputBar.vue                 # Text input + config buttons
+│       │   ├── SessionSidebar.vue           # Session list
+│       │   ├── MessageBubble.vue            # Message rendering
+│       │   ├── CodeBlock.vue                # Syntax-highlighted code (Shiki)
+│       │   ├── ToolCallCard.vue             # Tool input/output card
+│       │   └── ConfigPanel.vue              # MCP / Skills / Config tabs
+│       ├── composables/
+│       │   ├── useWebSocket.ts              # Auto-reconnect WebSocket
+│       │   ├── useChat.ts                   # Message state + streaming
+│       │   └── useSessions.ts               # Session CRUD
+│       └── types/
+│           └── messages.ts                  # Protocol + display types
+│
+└── docs/superpowers/
+    ├── plans/                               # Implementation plans
+    └── specs/                               # Design documents
+```
+
+### Adding a new channel (Discord, Feishu, Slack, etc.)
+
+1. Create `server/src/channels/<name>/{bot.ts,schema.ts}`
+2. Import the new schema into `services/config-file.ts` and add to `configSchema`
+3. Read `config.<name>` in `index.ts` and instantiate the bot if present
+4. Reuse `channels/formatter.ts` for SDK event formatting
+
+## API (used by web client)
 
 ### WebSocket — `/ws/chat`
 
 Client sends:
 ```json
 { "type": "new_session", "sessionName": "my-project" }
-{ "type": "message", "sessionName": "my-project", "content": "fix the bug in auth.ts" }
+{ "type": "message", "sessionName": "my-project", "content": "..." }
 { "type": "abort", "sessionName": "my-project" }
 ```
 
 Server sends:
 ```json
-{ "type": "session_start", "sessionName": "my-project", "sessionId": "uuid" }
+{ "type": "session_start", "sessionName": "my-project" }
 { "type": "sdk_event", "sessionName": "my-project", "event": { ... } }
 { "type": "done", "sessionName": "my-project" }
-{ "type": "error", "sessionName": "my-project", "error": "message" }
+{ "type": "error", "sessionName": "my-project", "message": "..." }
 ```
 
 ### REST
@@ -177,11 +192,20 @@ Server sends:
 | `GET /api/config/overview` | System overview |
 | `GET /health` | Health check |
 
+## Configuration
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | Server port |
+| `HOST` | `0.0.0.0` | Server bind address |
+
+Web sessions are stored in `~/.remoteclaude/cwd/{sessionName}/`. Telegram uses the `cwd` from `config.json` directly. Claude journal files (JSONL) are read from `~/.claude/projects/`.
+
 ## Tech Stack
 
-**Server:** Fastify, TypeScript, Claude Agent SDK, WebSocket
-
-**Web:** Vue 3 (Composition API), Vite, TypeScript, markdown-it, Shiki
+- **Server:** Fastify, TypeScript, Claude Agent SDK, `grammy` (Telegram), `zod`
+- **Web:** Vue 3 (Composition API), Vite, TypeScript, markdown-it, Shiki
+- **Monorepo:** npm workspaces (`server/`, `web/`)
 
 ## License
 
